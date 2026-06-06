@@ -1,6 +1,6 @@
 [package]
 name = "kindle-button-mapper"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Maps /dev/input events to script execution for Kindle e-readers"
 license = "MIT"

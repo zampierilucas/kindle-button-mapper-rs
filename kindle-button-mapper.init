@@ -21,10 +21,11 @@ start() {
         return 1
     fi
 
-    # Start daemon in background
+    touch "$LOGFILE"
     nohup "$DAEMON" "$CONFIG" >> "$LOGFILE" 2>&1 &
     echo $! > "$PIDFILE"
     echo "kindle-button-mapper daemon started (PID: $(cat $PIDFILE))"
+    echo "Logs: $LOGFILE"
 }
 
 stop() {
