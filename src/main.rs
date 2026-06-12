@@ -12,11 +12,8 @@ use mapper::Mapper;
 use nix::sys::signal::{signal, SigHandler, Signal};
 use std::env;
 use std::process::{self, Command};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
-
-static RUNNING: AtomicBool = AtomicBool::new(true);
 
 fn main() {
     env_logger::Builder::from_env(
@@ -105,16 +102,13 @@ fn main() {
 
     if handles.is_empty() {
         info!("No devices configured — idling. Add a device via the Button Mapper WAF app and restart.");
-        while RUNNING.load(Ordering::SeqCst) {
+        loop {
             thread::sleep(Duration::from_secs(60));
         }
-    } else {
-        for h in handles {
-            let _ = h.join();
-        }
     }
-
-    info!("Shutting down...");
+    for h in handles {
+        let _ = h.join();
+    }
 }
 
 fn device_worker(
@@ -128,7 +122,7 @@ fn device_worker(
 ) {
     let mut mapper = Mapper::new(&cfg, debounce_ms, long_press_ms, repeat_ms, log_buttons);
 
-    while RUNNING.load(Ordering::SeqCst) {
+    loop {
         let handler = InputHandler::new(cfg.name.clone(), cfg.path.clone(), cfg.uniq.clone(), cfg.grab);
         match handler.open() {
             Ok(mut device) => {
@@ -149,19 +143,13 @@ fn device_worker(
                 error!("[{}] failed to open device: {}", cfg.id, e);
             }
         }
-        if RUNNING.load(Ordering::SeqCst) {
-            info!("[{}] reconnecting in 1 second...", cfg.id);
-            thread::sleep(Duration::from_secs(1));
-        }
+        info!("[{}] reconnecting in 1 second...", cfg.id);
+        thread::sleep(Duration::from_secs(1));
     }
 }
 
 fn run_event_loop(device: &mut evdev::Device, mapper: &mut Mapper) -> Result<(), String> {
     loop {
-        if !RUNNING.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-
         let events = device.fetch_events()
             .map_err(|e| format!("Read error: {}", e))?;
 
@@ -192,8 +180,9 @@ fn run_event_loop(device: &mut evdev::Device, mapper: &mut Mapper) -> Result<(),
 }
 
 extern "C" fn handle_signal(_: i32) {
-    // Exit immediately - fetch_events() blocks so we can't wait for flag check
-    std::process::exit(0);
+    // Exit immediately - fetch_events() blocks so a shutdown flag would
+    // never be checked. _exit is async-signal-safe; process::exit is not.
+    unsafe { nix::libc::_exit(0) }
 }
 
 fn execute_script(script: &str) {
