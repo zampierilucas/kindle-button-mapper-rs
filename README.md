@@ -46,6 +46,7 @@ debounce_ms = 200
 long_press_ms = 500
 repeat_ms = 100
 log_buttons = true
+keep_awake = true
 on_connect = /path/to/script.sh
 on_disconnect = /path/to/script.sh
 
@@ -69,6 +70,8 @@ on_disconnect = /path/to/script.sh
 ```
 
 Use `log_buttons = true` to discover button codes for your device.
+
+`keep_awake = true` (default) resets the screensaver timer on input so the device stays awake while a controller is connected, without blocking the power button.
 
 ## On-device UI (MapperManager WAF)
 

@@ -17,7 +17,11 @@ use std::os::fd::BorrowedFd;
 use std::os::unix::io::AsRawFd;
 use std::process::{self, Command};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const KEEP_AWAKE_INTERVAL: Duration = Duration::from_secs(60);
+const KEEP_AWAKE_POKE: &str = "lipc-set-prop -i com.lab126.powerd touchScreenSaverTimeout 1";
+const KEEP_AWAKE_RELEASE: &str = "lipc-set-prop com.lab126.powerd preventScreenSaver 0";
 
 fn main() {
     env_logger::Builder::from_env(
@@ -87,19 +91,21 @@ fn main() {
     let _vkeyboard = vkeyboard::try_init();
 
     let mut handles = Vec::new();
-    let on_connect = config.on_connect.clone();
-    let on_disconnect = config.on_disconnect.clone();
+    let settings = WorkerSettings {
+        debounce_ms: config.debounce_ms,
+        long_press_ms: config.long_press_ms,
+        repeat_ms: config.repeat_ms,
+        log_buttons: config.log_buttons,
+        keep_awake: config.keep_awake,
+        on_connect: config.on_connect.clone(),
+        on_disconnect: config.on_disconnect.clone(),
+    };
     for device in config.devices {
         let id = device.id.clone();
-        let debounce_ms = config.debounce_ms;
-        let long_press_ms = config.long_press_ms;
-        let repeat_ms = config.repeat_ms;
-        let log_buttons = config.log_buttons;
-        let on_conn = on_connect.clone();
-        let on_disc = on_disconnect.clone();
+        let settings = settings.clone();
         let h = thread::Builder::new()
             .name(format!("dev:{}", id))
-            .spawn(move || device_worker(device, debounce_ms, long_press_ms, repeat_ms, log_buttons, on_conn, on_disc))
+            .spawn(move || device_worker(device, settings))
             .expect("spawn device thread");
         handles.push(h);
     }
@@ -115,29 +121,38 @@ fn main() {
     }
 }
 
-fn device_worker(
-    cfg: config::DeviceConfig,
+#[derive(Clone)]
+struct WorkerSettings {
     debounce_ms: u64,
     long_press_ms: u64,
     repeat_ms: u64,
     log_buttons: bool,
+    keep_awake: bool,
     on_connect: Option<String>,
     on_disconnect: Option<String>,
-) {
-    let mut mapper = Mapper::new(&cfg, debounce_ms, long_press_ms, repeat_ms, log_buttons);
+}
+
+fn device_worker(cfg: config::DeviceConfig, settings: WorkerSettings) {
+    let mut mapper = Mapper::new(
+        &cfg,
+        settings.debounce_ms,
+        settings.long_press_ms,
+        settings.repeat_ms,
+        settings.log_buttons,
+    );
 
     loop {
-        let handler = InputHandler::new(cfg.name.clone(), cfg.path.clone(), cfg.uniq.clone(), cfg.grab);
+        let handler = InputHandler::new(cfg.name.clone(), cfg.uniq.clone(), cfg.grab);
         match handler.open() {
             Ok(mut device) => {
                 info!("[{}] device connected", cfg.id);
-                if let Some(ref script) = on_connect {
+                if let Some(ref script) = settings.on_connect {
                     info!("[{}] running on_connect script", cfg.id);
                     execute_script(script);
                 }
-                if let Err(e) = run_event_loop(&mut device, &mut mapper, cfg.grab) {
+                if let Err(e) = run_event_loop(&mut device, &mut mapper, cfg.grab, settings.keep_awake) {
                     error!("[{}] event loop error: {}", cfg.id, e);
-                    if let Some(ref script) = on_disconnect {
+                    if let Some(ref script) = settings.on_disconnect {
                         info!("[{}] device disconnected, running on_disconnect script", cfg.id);
                         execute_script(script);
                     }
@@ -152,10 +167,17 @@ fn device_worker(
     }
 }
 
-fn run_event_loop(device: &mut evdev::Device, mapper: &mut Mapper, grab: bool) -> Result<(), String> {
+fn run_event_loop(device: &mut evdev::Device, mapper: &mut Mapper, grab: bool, keep_awake: bool) -> Result<(), String> {
     // Non-blocking + poll so we can notice a capture pause while idle.
     set_nonblocking(device.as_raw_fd());
     let mut grabbed = grab;
+
+    let mut last_poke: Option<Instant> = if keep_awake {
+        execute_script(KEEP_AWAKE_RELEASE);
+        Some(Instant::now())
+    } else {
+        None
+    };
 
     loop {
         // Release the grab while capture is paused, restore it after.
@@ -194,9 +216,11 @@ fn run_event_loop(device: &mut evdev::Device, mapper: &mut Mapper, grab: bool) -
             continue;
         }
 
+        let mut activity = false;
         for event in events {
             match event.kind() {
                 InputEventKind::Key(key) => {
+                    activity = true;
                     match event.value() {
                         1 => mapper.handle_press(key),  // Press
                         2 => mapper.handle_held(key),   // Held/repeat
@@ -208,13 +232,28 @@ fn run_event_loop(device: &mut evdev::Device, mapper: &mut Mapper, grab: bool) -
                     let code = axis.0;
                     match code {
                         // D-pad: Hat0X (16) and Hat0Y (17)
-                        16 | 17 => mapper.handle_dpad(code, event.value()),
+                        16 | 17 => {
+                            activity = true;
+                            mapper.handle_dpad(code, event.value());
+                        }
                         // Triggers: Gas (9) = RT, Brake (10) = LT
-                        9 | 10 => mapper.handle_trigger(code, event.value()),
+                        9 | 10 => {
+                            activity = true;
+                            mapper.handle_trigger(code, event.value());
+                        }
                         _ => {}
                     }
                 }
                 _ => {}
+            }
+        }
+
+        if keep_awake && activity {
+            let now = Instant::now();
+            if last_poke.is_none_or(|t| now.duration_since(t) >= KEEP_AWAKE_INTERVAL) {
+                info!("keep-awake: re-armed screensaver idle timer");
+                execute_script(KEEP_AWAKE_POKE);
+                last_poke = Some(now);
             }
         }
     }

@@ -22,6 +22,7 @@ cp "$SRC_DIR/kindle-button-mapper.init" "$INSTALL_DIR/"
 cp "$SRC_DIR/uninstall.sh" "$INSTALL_DIR/"
 [ -f "$INSTALL_DIR/config.ini" ] || cp "$SRC_DIR/config.ini" "$INSTALL_DIR/"
 cp "$SRC_DIR/scripts/"*.sh "$INSTALL_DIR/scripts/"
+rm -f "$INSTALL_DIR/scripts/start-inhib.sh" "$INSTALL_DIR/scripts/stop-inhib.sh"
 cp "$SRC_DIR/illusion/MapperManager.sh" "$SRC_DIR/illusion/install-waf-app.sh" "$INSTALL_DIR/illusion/"
 cp "$SRC_DIR/illusion/MapperManager/"* "$INSTALL_DIR/illusion/MapperManager/"
 

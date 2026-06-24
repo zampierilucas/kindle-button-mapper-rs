@@ -24,7 +24,6 @@ pub enum Trigger {
 pub struct DeviceConfig {
     pub id: String,
     pub name: Option<String>,
-    pub path: Option<String>,
     pub uniq: Option<String>,
     pub grab: bool,
     pub mappings: HashMap<Key, String>,
@@ -40,7 +39,6 @@ impl DeviceConfig {
         Self {
             id,
             name: None,
-            path: None,
             uniq: None,
             grab: true,
             mappings: HashMap::new(),
@@ -60,6 +58,7 @@ pub struct Config {
     pub long_press_ms: u64,
     pub repeat_ms: u64,
     pub log_buttons: bool,
+    pub keep_awake: bool,
     pub on_connect: Option<String>,
     pub on_disconnect: Option<String>,
 }
@@ -72,6 +71,7 @@ impl Default for Config {
             long_press_ms: 500,
             repeat_ms: 100,
             log_buttons: false,
+            keep_awake: true,
             on_connect: None,
             on_disconnect: None,
         }
@@ -86,7 +86,12 @@ debounce_ms = 0
 log_buttons = true
 long_press_ms = 500
 repeat_ms = 100
+keep_awake = true
 ";
+
+const OLD_SECTIONS: [&str; 7] = [
+    "device", "buttons", "longpress", "dpad", "dpad_longpress", "triggers", "triggers_longpress",
+];
 
 impl Config {
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self, String> {
@@ -102,30 +107,21 @@ impl Config {
         let mut config = Config::default();
         let map = ini.get_map_ref();
 
-        // [settings] — global daemon settings
-        if let Some(settings) = map.get("settings") {
-            if let Some(Some(v)) = settings.get("debounce_ms") {
-                config.debounce_ms = v.parse().unwrap_or(config.debounce_ms);
-            }
-            if let Some(Some(v)) = settings.get("long_press_ms") {
-                config.long_press_ms = v.parse().unwrap_or(config.long_press_ms);
-            }
-            if let Some(Some(v)) = settings.get("repeat_ms") {
-                config.repeat_ms = v.parse().unwrap_or(config.repeat_ms);
-            }
-            if let Some(Some(v)) = settings.get("log_buttons") {
-                config.log_buttons = matches!(v.to_lowercase().as_str(), "true" | "yes" | "1");
-            }
-            if let Some(Some(v)) = settings.get("on_connect") {
-                if !v.is_empty() {
-                    config.on_connect = Some(v.clone());
-                }
-            }
-            if let Some(Some(v)) = settings.get("on_disconnect") {
-                if !v.is_empty() {
-                    config.on_disconnect = Some(v.clone());
-                }
-            }
+        if map.keys().any(|s| OLD_SECTIONS.contains(&s.as_str())) {
+            return Err(format!(
+                "{} uses the old config format. Delete it and re-add your device via the Button Mapper app.",
+                p.display()
+            ));
+        }
+
+        if let Some(s) = map.get("settings") {
+            if let Some(v) = get(s, "debounce_ms") { config.debounce_ms = v.parse().unwrap_or(config.debounce_ms); }
+            if let Some(v) = get(s, "long_press_ms") { config.long_press_ms = v.parse().unwrap_or(config.long_press_ms); }
+            if let Some(v) = get(s, "repeat_ms") { config.repeat_ms = v.parse().unwrap_or(config.repeat_ms); }
+            if let Some(v) = get(s, "log_buttons") { config.log_buttons = parse_bool(v); }
+            if let Some(v) = get(s, "keep_awake") { config.keep_awake = parse_bool(v); }
+            config.on_connect = get(s, "on_connect").filter(|v| !v.is_empty()).map(String::from);
+            config.on_disconnect = get(s, "on_disconnect").filter(|v| !v.is_empty()).map(String::from);
         }
 
         // First pass: collect device IDs from [device.NAME] sections, ordered by appearance.
@@ -165,19 +161,9 @@ impl Config {
 
             match parts.get(2).copied() {
                 None => {
-                    // [device.NAME] — device meta
-                    if let Some(Some(v)) = entries.get("name") {
-                        dev.name = Some(v.clone());
-                    }
-                    if let Some(Some(v)) = entries.get("path") {
-                        dev.path = Some(v.clone());
-                    }
-                    if let Some(Some(v)) = entries.get("uniq") {
-                        dev.uniq = Some(v.clone());
-                    }
-                    if let Some(Some(v)) = entries.get("grab") {
-                        dev.grab = matches!(v.to_lowercase().as_str(), "true" | "yes" | "1");
-                    }
+                    if let Some(v) = get(entries, "name") { dev.name = Some(v.to_string()); }
+                    if let Some(v) = get(entries, "uniq") { dev.uniq = Some(v.to_string()); }
+                    if let Some(v) = get(entries, "grab") { dev.grab = parse_bool(v); }
                 }
                 Some("buttons") => fill_key_map(entries, &mut dev.mappings),
                 Some("longpress") => fill_key_map(entries, &mut dev.long_press_mappings),
@@ -191,64 +177,24 @@ impl Config {
             }
         }
 
-        // Backward compat: flat [device] + [buttons] / [dpad] / [triggers] etc.
-        // Promote to a single device named "default".
-        if let Some(legacy) = map.get("device") {
-            // Only if the legacy section actually has device fields (path/name)
-            // *and* we didn't already see a [device.NAME] section.
-            let has_legacy_fields = legacy.contains_key("path")
-                || legacy.contains_key("name")
-                || legacy.contains_key("uniq")
-                || legacy.contains_key("grab");
-            if has_legacy_fields && devices.is_empty() {
-                let mut dev = DeviceConfig::new("default".to_string());
-                if let Some(Some(v)) = legacy.get("name") {
-                    dev.name = Some(v.clone());
-                }
-                if let Some(Some(v)) = legacy.get("path") {
-                    dev.path = Some(v.clone());
-                }
-                if let Some(Some(v)) = legacy.get("uniq") {
-                    dev.uniq = Some(v.clone());
-                }
-                if let Some(Some(v)) = legacy.get("grab") {
-                    dev.grab = matches!(v.to_lowercase().as_str(), "true" | "yes" | "1");
-                }
-                if let Some(e) = map.get("buttons") {
-                    fill_key_map(e, &mut dev.mappings);
-                }
-                if let Some(e) = map.get("longpress") {
-                    fill_key_map(e, &mut dev.long_press_mappings);
-                }
-                if let Some(e) = map.get("dpad") {
-                    fill_dpad_map(e, &mut dev.dpad_mappings);
-                }
-                if let Some(e) = map.get("dpad_longpress") {
-                    fill_dpad_map(e, &mut dev.dpad_longpress_mappings);
-                }
-                if let Some(e) = map.get("triggers") {
-                    fill_trigger_map(e, &mut dev.trigger_mappings);
-                }
-                if let Some(e) = map.get("triggers_longpress") {
-                    fill_trigger_map(e, &mut dev.trigger_longpress_mappings);
-                }
-                devices.insert("default".to_string(), dev);
-                order.push("default".to_string());
-            }
-        }
-
         for id in order {
             if let Some(dev) = devices.remove(&id) {
-                if dev.path.is_some() || dev.name.is_some() || dev.uniq.is_some() {
+                if dev.name.is_some() || dev.uniq.is_some() {
                     config.devices.push(dev);
                 }
             }
         }
 
-        // Empty device list is allowed — daemon will idle and let the
-        // WAF add devices before a restart.
         Ok(config)
     }
+}
+
+fn get<'a>(section: &'a HashMap<String, Option<String>>, key: &str) -> Option<&'a str> {
+    section.get(key).and_then(|v| v.as_deref())
+}
+
+fn parse_bool(v: &str) -> bool {
+    matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "yes" | "1" | "on")
 }
 
 fn fill_key_map(
