@@ -19,8 +19,9 @@ var MapperManager = (function() {
     var actionTab = "koreader"; // which tab is showing in the action picker
     var currentDeviceId = null; // currently selected device on Bindings tab
     var editingDeviceId = null; // device being edited in the detail overlay (null = new)
-    var devDetailUniq = "";    // uniq (MAC) carried through the detail overlay
     var continuousCapture = false; // when true, re-fire capture after each action pick
+    var deviceScanTimer = null; // Device tab auto-refresh interval
+    var lastDevicesSig = "";    // last /devices result, to skip redundant renders
 
     var DEVICE_KINDS = ["buttons", "longpress", "dpad", "dpad_longpress", "triggers", "triggers_longpress"];
 
@@ -332,7 +333,8 @@ var MapperManager = (function() {
         for (var j = 0; j < panes.length; j++) {
             panes[j].className = "tab-content" + (panes[j].id === "tab-" + name ? " tab-visible" : "");
         }
-        if (name === "device") { refreshDevices(); refreshStatus(); }
+        if (name === "device") { refreshDevices(); refreshStatus(); startDeviceAutoRefresh(); }
+        else { stopDeviceAutoRefresh(); }
         if (name === "debug") { renderRawConfig(); }
     }
 
@@ -476,12 +478,43 @@ var MapperManager = (function() {
 
     function captureNewButton(longPress) {
         if (!currentDeviceId) { showMessage("Add a device first", true); return; }
-        var devPath = getValue("device." + currentDeviceId, "path");
-        if (!devPath) {
-            showMessage("This device has no /dev/input path yet — opening editor.", true);
-            openDeviceDetail(currentDeviceId);
-            return;
-        }
+        showMessage("Finding device...", false);
+        resolveDevicePath(currentDeviceId, function(devPath, err) {
+            if (!devPath) { showMessage(err || "Device not connected", true); return; }
+            startCapture(devPath, longPress);
+        });
+    }
+
+    function resolveDevicePath(id, cb) {
+        var uniq = getValue("device." + id, "uniq") || "";
+        var name = getValue("device." + id, "name") || "";
+        getJSON("/devices", function(data, err) {
+            if (err) { cb(null, "Devices: " + err); return; }
+            var list = data.devices || [];
+            var match = null;
+            for (var i = 0; i < list.length; i++) {
+                if (uniq && list[i].uniq === uniq) {
+                    match = list[i];
+                    break;
+                }
+            }
+            if (!match && name) {
+                for (var j = 0; j < list.length; j++) {
+                    if (list[j].name === name) {
+                        match = list[j];
+                        break;
+                    }
+                }
+            }
+            if (match) {
+                cb(match.path, null);
+            } else {
+                cb(null, "Device not connected");
+            }
+        });
+    }
+
+    function startCapture(devPath, longPress) {
         showOverlay("captureOverlay");
         getEl("captureMsg").innerHTML = continuousCapture
             ? "Press a button — Cancel to stop"
@@ -675,15 +708,34 @@ var MapperManager = (function() {
 
     // ---- Device tab ----
 
-    function refreshDevices() {
-        renderConfiguredDevices();
-        showMessage("Scanning /dev/input...", false);
+    function refreshDevices(quiet) {
+        if (!quiet) {
+            renderConfiguredDevices();
+            showMessage("Scanning /dev/input...", false);
+        }
         getJSON("/devices", function(data, err) {
-            if (err) { showMessage("Devices: " + err, true); return; }
-            devices = data.devices || [];
-            renderAvailableDeviceList();
-            showMessage("Found " + devices.length + " device(s)", false);
+            if (err) { if (!quiet) showMessage("Devices: " + err, true); return; }
+            var list = data.devices || [];
+            var sig = JSON.stringify(list);
+            if (sig !== lastDevicesSig) {
+                lastDevicesSig = sig;
+                devices = list;
+                renderAvailableDeviceList();
+            }
+            if (!quiet) showMessage("Found " + list.length + " device(s)", false);
         });
+    }
+
+    function startDeviceAutoRefresh() {
+        stopDeviceAutoRefresh();
+        deviceScanTimer = setInterval(function() { refreshDevices(true); }, 4000);
+    }
+
+    function stopDeviceAutoRefresh() {
+        if (deviceScanTimer) {
+            clearInterval(deviceScanTimer);
+            deviceScanTimer = null;
+        }
     }
 
     function renderConfiguredDevices() {
@@ -692,10 +744,10 @@ var MapperManager = (function() {
         for (var i = 0; i < ids.length; i++) {
             var id = ids[i];
             var name = getValue("device." + id, "name") || id;
-            var path = getValue("device." + id, "path") || "(no path)";
+            var sub = getValue("device." + id, "uniq") || getValue("device." + id, "name") || "(no id)";
             html += '<div class="device-row" data-dev-id="' + escapeHtml(id) + '">'
                 + '<div class="device-row-name">' + escapeHtml(name) + '</div>'
-                + '<div class="device-row-path">' + escapeHtml(path) + '</div>'
+                + '<div class="device-row-path">' + escapeHtml(sub) + '</div>'
                 + '</div>';
         }
         var el = getEl("configuredDevices");
@@ -704,7 +756,7 @@ var MapperManager = (function() {
 
     function renderAvailableDeviceList() {
         // /dev/input/event* nodes. Tapping one prefills a new-device dialog
-        // with that path so the user can save it as a configured device.
+        // with its name and MAC so the user can save it as a configured device.
         var html = "";
         for (var i = 0; i < devices.length; i++) {
             var d = devices[i];
@@ -734,7 +786,7 @@ var MapperManager = (function() {
                 var path = row.getAttribute("data-avail-path");
                 var name = row.getAttribute("data-avail-name");
                 var uniq = row.getAttribute("data-avail-uniq");
-                if (path) { openDeviceDetailNew(path, name, uniq); return; }
+                if (path) { openDeviceDetailNew(name, uniq); return; }
             }
             row = row.parentNode;
         }
@@ -742,12 +794,11 @@ var MapperManager = (function() {
 
     // ---- Device detail / add dialog ----
 
-    function openDeviceDetailNew(prefillPath, prefillName, prefillUniq) {
+    function openDeviceDetailNew(prefillName, prefillUniq) {
         editingDeviceId = null;
-        devDetailUniq = prefillUniq || "";
         getEl("deviceDetailTitle").innerHTML = "New device";
         getEl("devDetailName").value = prefillName || "";
-        getEl("devDetailPath").value = prefillPath || "";
+        getEl("devDetailUniq").value = prefillUniq || "";
         getEl("devDetailGrab").className = "toggle";
         getEl("btnDeviceDelete").style.display = "none";
         updateDeviceIdView();
@@ -756,10 +807,9 @@ var MapperManager = (function() {
 
     function openDeviceDetail(id) {
         editingDeviceId = id;
-        devDetailUniq = getValue("device." + id, "uniq") || "";
         getEl("deviceDetailTitle").innerHTML = "Edit device";
         getEl("devDetailName").value = getValue("device." + id, "name") || "";
-        getEl("devDetailPath").value = getValue("device." + id, "path") || "";
+        getEl("devDetailUniq").value = getValue("device." + id, "uniq") || "";
         var grab = (getValue("device." + id, "grab") || "").toLowerCase() === "true";
         getEl("devDetailGrab").className = "toggle" + (grab ? " on" : "");
         getEl("btnDeviceDelete").style.display = "block";
@@ -791,9 +841,9 @@ var MapperManager = (function() {
             showMessage("Name needs at least one letter or digit", true);
             return;
         }
-        var path = (getEl("devDetailPath").value || "").replace(/^\s+|\s+$/g, "");
-        if (!path) {
-            showMessage("Path is required — pick one from /dev/input on the Device tab", true);
+        var uniq = (getEl("devDetailUniq").value || "").replace(/^\s+|\s+$/g, "");
+        if (!uniq && !name) {
+            showMessage("Set a name or MAC", true);
             return;
         }
         var grab = getEl("devDetailGrab").className.indexOf(" on") >= 0 ? "true" : "false";
@@ -804,9 +854,9 @@ var MapperManager = (function() {
         }
 
         setValue("device." + newId, "name", name);
-        setValue("device." + newId, "path", path);
         setValue("device." + newId, "grab", grab);
-        if (devDetailUniq) setValue("device." + newId, "uniq", devDetailUniq);
+        if (uniq) { setValue("device." + newId, "uniq", uniq); } else { delValue("device." + newId, "uniq"); }
+        delValue("device." + newId, "path");
 
         if (!currentDeviceId) currentDeviceId = newId;
         closeDeviceDetail();
@@ -887,6 +937,26 @@ var MapperManager = (function() {
         captureNewButton(false);
     }
 
+    function openLogs() {
+        getEl("logsContent").innerHTML = "Loading...";
+        showOverlay("logsOverlay");
+        request("GET", "/logs", null, function(text, err) {
+            if (err) { getEl("logsContent").innerHTML = escapeHtml("Error: " + err); return; }
+            var lines = (text || "").split("\n");
+            for (var i = 0; i < lines.length; i++) { lines[i] = formatLogLine(lines[i]); }
+            getEl("logsContent").innerHTML = escapeHtml(lines.join("\n")) || "(empty)";
+        });
+    }
+
+    function formatLogLine(line) {
+        var m = line.match(/^\[\d{4}-\d{2}-\d{2}T(\d{2}:\d{2}:\d{2})Z\s+(\w+)\s+([^\]]*)\]\s?(.*)$/);
+        if (!m) return line;
+        var mod = m[3].replace(/^kindle_button_mapper(::)?/, "");
+        return m[1] + " " + m[2] + (mod ? " " + mod : "") + ": " + m[4];
+    }
+
+    function closeLogs() { hideOverlay("logsOverlay"); }
+
     // ---- Quit ----
 
     function quit() {
@@ -921,6 +991,9 @@ var MapperManager = (function() {
         getEl("btnDaemonStop").addEventListener("click", stopDaemon, false);
         getEl("btnDaemonStart").addEventListener("click", startDaemon, false);
         getEl("btnLiveCapture").addEventListener("click", liveCapture, false);
+        getEl("btnLogs").addEventListener("click", openLogs, false);
+        getEl("btnLogsRefresh").addEventListener("click", openLogs, false);
+        getEl("btnLogsClose").addEventListener("click", closeLogs, false);
         getEl("btnSaveRaw").addEventListener("click", saveRawConfig, false);
         getEl("btnCaptureCancel").addEventListener("click", cancelCapture, false);
         getEl("btnActionCancel").addEventListener("click", function() {

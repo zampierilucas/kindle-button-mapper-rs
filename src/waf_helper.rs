@@ -78,6 +78,7 @@ fn route(method: &str, path: &str, body: &str, config_path: &str) -> (u16, Strin
     match (method, route) {
         ("GET", "/") | ("GET", "/health") => (200, json_ok()),
         ("GET", "/status") => (200, status_json(config_path)),
+        ("GET", "/logs") => (200, logs_text()),
         ("GET", "/config") => match fs::read_to_string(config_path) {
             Ok(s) => (200, s),
             Err(_) => (200, String::new()),
@@ -273,6 +274,18 @@ fn status_json(config_path: &str) -> String {
         env!("CARGO_PKG_VERSION"),
         env!("BUILD_SHA")
     )
+}
+
+fn logs_text() -> String {
+    const LOG_PATH: &str = "/var/log/kindle-button-mapper.log";
+    match fs::read_to_string(LOG_PATH) {
+        Ok(s) => {
+            let lines: Vec<&str> = s.lines().collect();
+            let start = lines.len().saturating_sub(200);
+            lines[start..].join("\n")
+        }
+        Err(e) => format!("cannot read {}: {}", LOG_PATH, e),
+    }
 }
 
 fn capture(query: &std::collections::HashMap<String, String>) -> (u16, String) {
