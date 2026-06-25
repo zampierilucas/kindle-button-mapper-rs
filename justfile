@@ -51,8 +51,11 @@ deploy: build-kindle
     @echo "Creating directories..."
     ssh kindle "mkdir -p /mnt/us/kindle-button-mapper/scripts"
     @echo "Copying files..."
-    scp target/armv7-unknown-linux-musleabihf/release/kindle-button-mapper kindle:/mnt/us/kindle-button-mapper/
-    scp config.ini kindle:/mnt/us/kindle-button-mapper/
+    # scp can't overwrite the running binary (busy on vfat); copy to a temp name and rename.
+    scp target/armv7-unknown-linux-musleabihf/release/kindle-button-mapper kindle:/mnt/us/kindle-button-mapper/kindle-button-mapper.new
+    ssh kindle "mv -f /mnt/us/kindle-button-mapper/kindle-button-mapper.new /mnt/us/kindle-button-mapper/kindle-button-mapper && chmod +x /mnt/us/kindle-button-mapper/kindle-button-mapper"
+    @echo "Copying config (only if absent, to preserve device bindings)..."
+    ssh kindle "test -f /mnt/us/kindle-button-mapper/config.ini" || scp config.ini kindle:/mnt/us/kindle-button-mapper/
     scp scripts/*.sh kindle:/mnt/us/kindle-button-mapper/scripts/
     ssh kindle "chmod +x /mnt/us/kindle-button-mapper/scripts/*.sh"
     scp kindle-button-mapper.init kindle:/etc/init.d/kindle-button-mapper
