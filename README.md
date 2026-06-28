@@ -113,7 +113,7 @@ Uninstall: `ssh kindle "sh /mnt/us/kindle-button-mapper/uninstall.sh"` (the scri
 - Jailbroken Kindle (Kindle 5+ / FW 5.x).
 - Linux kernel with evdev (`/dev/input/eventX`) — present on all stock Kindles.
 - An input device the Kindle can see — e.g. a Bluetooth gamepad/remote bridged via [kindle-hid-passthrough](https://github.com/zampierilucas/kindle-hid-passthrough), or any USB OTG HID device.
-- **KOReader HTTP Inspector** (for KOReader integration): enable auto-start once in KOReader → *Tools → More Tools → HTTP Inspector → Auto-start HTTP server*. The default mappings in `scripts/koreader.sh` send commands to `localhost:8080`.
+- **KOReader HTTP Inspector** (for KOReader integration): enable auto-start once in KOReader → *Tools → More Tools → HTTP Inspector → Auto-start HTTP server*. The default mappings in `scripts/koreader.sh` send commands to `localhost:8080`. MapperManager warns you in the KOReader action tab when this auto-start is off.
 
 ## Hardware
 

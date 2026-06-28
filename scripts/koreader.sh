@@ -13,10 +13,13 @@
 #   event <name> [args] - Send arbitrary event
 
 KOREADER_URL="http://localhost:8080/koreader/event"
+LOG_PATH="/var/log/kindle-button-mapper.log"
 
 # Send event to KOReader
 send_event() {
-    curl -s --connect-timeout 1 "${KOREADER_URL}/$1" >/dev/null 2>&1
+    if ! curl -s --connect-timeout 1 "${KOREADER_URL}/$1" >/dev/null 2>&1; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') WARN  koreader.sh: KOReader not reachable at ${KOREADER_URL} (event '$1' dropped); KOReader may be closed, or HTTP Inspector auto-start is off." >> "$LOG_PATH" 2>/dev/null
+    fi
 }
 
 case "$1" in

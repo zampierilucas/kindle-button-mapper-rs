@@ -583,6 +583,9 @@ var MapperManager = (function() {
         getEl("actionCustom").className = "action-custom" + (isCustom ? " visible" : "");
         getEl("actionList").style.display = isCustom ? "none" : "block";
 
+        if (actionTab === "koreader") refreshKoreaderStatus();
+        else getEl("koreaderStatus").className = "koreader-status hidden";
+
         if (isCustom) return;
 
         var items = isKbd ? filteredKeys : actions;
@@ -594,6 +597,18 @@ var MapperManager = (function() {
         var list = getEl("actionList");
         list.innerHTML = html;
         list.scrollTop = 0;
+    }
+
+    function refreshKoreaderStatus() {
+        var el = getEl("koreaderStatus");
+        el.className = "koreader-status hidden";
+        getJSON("/koreader/status", function(data, err) {
+            if (actionTab !== "koreader" || !data || err || data.autostart) return;
+            el.className = "koreader-status";
+            el.innerHTML = "KOReader HTTP Inspector is off. In KOReader, open "
+                + "<b>Tools → More Tools → HTTP Inspector → Auto start HTTP server</b> "
+                + "to use these actions.";
+        });
     }
 
     function onActionTabClick(e) {

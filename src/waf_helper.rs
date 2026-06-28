@@ -78,6 +78,7 @@ fn route(method: &str, path: &str, body: &str, config_path: &str) -> (u16, Strin
     match (method, route) {
         ("GET", "/") | ("GET", "/health") => (200, json_ok()),
         ("GET", "/status") => (200, status_json(config_path)),
+        ("GET", "/koreader/status") => (200, koreader_status_json()),
         ("GET", "/logs") => (200, logs_text()),
         ("GET", "/config") => match fs::read_to_string(config_path) {
             Ok(s) => (200, s),
@@ -274,6 +275,21 @@ fn status_json(config_path: &str) -> String {
         env!("CARGO_PKG_VERSION"),
         env!("BUILD_SHA")
     )
+}
+
+const KOREADER_SETTINGS_PATH: &str = "/mnt/us/koreader/settings.reader.lua";
+
+fn koreader_status_json() -> String {
+    let autostart = fs::read_to_string(KOREADER_SETTINGS_PATH)
+        .map(|s| httpinspector_autostart_enabled(&s))
+        .unwrap_or(false);
+    format!("{{\"ok\":true,\"autostart\":{}}}", autostart)
+}
+
+fn httpinspector_autostart_enabled(lua: &str) -> bool {
+    lua.split_once("[\"httpinspector\"]")
+        .and_then(|(_, rest)| rest.split_once('}'))
+        .is_some_and(|(table, _)| table.contains("[\"autostart\"] = true"))
 }
 
 fn logs_text() -> String {
