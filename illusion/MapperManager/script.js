@@ -12,6 +12,7 @@ var MapperManager = (function() {
 
     var messageTimer = null;
     var actions = [];          // [{id, label}] from /actions
+    var layouts = [];          // [{code, name}] from /layouts
     var devices = [];          // [{path, name, uniq}]
     var ini = null;            // parsed config
     var pendingSlot = null;    // slot object awaiting an action pick
@@ -815,6 +816,7 @@ var MapperManager = (function() {
         getEl("devDetailName").value = prefillName || "";
         getEl("devDetailUniq").value = prefillUniq || "";
         getEl("devDetailGrab").className = "toggle";
+        populateLayoutSelect("");
         getEl("btnDeviceDelete").style.display = "none";
         updateDeviceIdView();
         showOverlay("deviceDetailOverlay");
@@ -827,6 +829,7 @@ var MapperManager = (function() {
         getEl("devDetailUniq").value = getValue("device." + id, "uniq") || "";
         var grab = (getValue("device." + id, "grab") || "").toLowerCase() === "true";
         getEl("devDetailGrab").className = "toggle" + (grab ? " on" : "");
+        populateLayoutSelect(getValue("device." + id, "keyboard_layout") || "");
         getEl("btnDeviceDelete").style.display = "block";
         getEl("devDetailIdView").innerHTML = escapeHtml(id);
         showOverlay("deviceDetailOverlay");
@@ -868,9 +871,12 @@ var MapperManager = (function() {
             return;
         }
 
+        var layout = (getEl("devDetailLayout").value || "").replace(/^\s+|\s+$/g, "");
+
         setValue("device." + newId, "name", name);
         setValue("device." + newId, "grab", grab);
         if (uniq) { setValue("device." + newId, "uniq", uniq); } else { delValue("device." + newId, "uniq"); }
+        if (layout) { setValue("device." + newId, "keyboard_layout", layout); } else { delValue("device." + newId, "keyboard_layout"); }
         delValue("device." + newId, "path");
 
         if (!currentDeviceId) currentDeviceId = newId;
@@ -1058,6 +1064,9 @@ var MapperManager = (function() {
         getEl("devDetailGrabInfo").addEventListener("click", function() {
             showInfo("Exclusive: take sole ownership of the input device so other apps (e.g. the Kindle reader) don't also react to its events. Recommended for gamepads and remotes when you only want the mapper to handle them.");
         }, false);
+        getEl("devDetailLayoutInfo").addEventListener("click", function() {
+            showInfo("Keyboard layout: pick an XKB layout re-applied every time this keyboard connects, so a non-US layout survives reconnects. Choose (system default) to leave the layout untouched.");
+        }, false);
         getEl("btnInfoClose").addEventListener("click", function() {
             hideOverlay("infoOverlay");
         }, false);
@@ -1128,10 +1137,32 @@ var MapperManager = (function() {
         });
     }
 
+    function populateLayoutSelect(selected) {
+        var sel = getEl("devDetailLayout");
+        selected = selected || "";
+        var html = '<option value="">(system default)</option>';
+        var hasSelected = !selected;
+        for (var i = 0; i < layouts.length; i++) {
+            var code = layouts[i].code;
+            var name = layouts[i].name || code;
+            if (code === selected) hasSelected = true;
+            html += '<option value="' + escapeHtml(code) + '">' + escapeHtml(code) + ' — ' + escapeHtml(name) + '</option>';
+        }
+        // Preserve a stored value (e.g. a variant like fr(oss)) not in the base list.
+        if (!hasSelected) {
+            html += '<option value="' + escapeHtml(selected) + '">' + escapeHtml(selected) + '</option>';
+        }
+        sel.innerHTML = html;
+        sel.value = selected;
+    }
+
     function init() {
         bindEvents();
         setTimeout(sizeTabContent, 0);
         bootstrapFetch(0);
+        getJSON("/layouts", function(data) {
+            if (data && data.layouts) layouts = data.layouts;
+        });
         refreshStatus();
     }
 

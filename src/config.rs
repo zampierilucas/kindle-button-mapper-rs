@@ -26,6 +26,7 @@ pub struct DeviceConfig {
     pub name: Option<String>,
     pub uniq: Option<String>,
     pub grab: bool,
+    pub keyboard_layout: Option<String>,
     pub mappings: HashMap<Key, String>,
     pub long_press_mappings: HashMap<Key, String>,
     pub dpad_mappings: HashMap<DpadDirection, String>,
@@ -41,6 +42,7 @@ impl DeviceConfig {
             name: None,
             uniq: None,
             grab: true,
+            keyboard_layout: None,
             mappings: HashMap::new(),
             long_press_mappings: HashMap::new(),
             dpad_mappings: HashMap::new(),
@@ -164,6 +166,10 @@ impl Config {
                     if let Some(v) = get(entries, "name") { dev.name = Some(v.to_string()); }
                     if let Some(v) = get(entries, "uniq") { dev.uniq = Some(v.to_string()); }
                     if let Some(v) = get(entries, "grab") { dev.grab = parse_bool(v); }
+                    dev.keyboard_layout = get(entries, "keyboard_layout")
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty())
+                        .map(String::from);
                 }
                 Some("buttons") => fill_key_map(entries, &mut dev.mappings),
                 Some("longpress") => fill_key_map(entries, &mut dev.long_press_mappings),

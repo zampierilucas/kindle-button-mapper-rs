@@ -90,6 +90,7 @@ fn route(method: &str, path: &str, body: &str, config_path: &str) -> (u16, Strin
         },
         ("GET", "/devices") => (200, devices_json()),
         ("GET", "/actions") => (200, actions_json()),
+        ("GET", "/layouts") => (200, layouts_json()),
         ("GET", "/capture") => capture(&query),
         ("POST", "/reload") => reload_daemon(),
         ("POST", "/stop") => stop_daemon(),
@@ -259,6 +260,32 @@ fn actions_json() -> String {
         .map(|(id, label)| format!("{{\"id\":\"{}\",\"label\":\"{}\"}}", esc(id), esc(label)))
         .collect();
     format!("{{\"ok\":true,\"actions\":[{}]}}", items.join(","))
+}
+
+const XKB_RULES_LST: &str = "/usr/share/X11/xkb/rules/evdev.lst";
+
+fn layouts_json() -> String {
+    let content = fs::read_to_string(XKB_RULES_LST).unwrap_or_default();
+    let mut in_section = false;
+    let mut items: Vec<String> = Vec::new();
+    for line in content.lines() {
+        let header = line.trim();
+        if header.starts_with('!') {
+            in_section = header == "! layout";
+            continue;
+        }
+        if !in_section || header.is_empty() {
+            continue;
+        }
+        let mut parts = header.splitn(2, char::is_whitespace);
+        let code = parts.next().unwrap_or("").trim();
+        let name = parts.next().unwrap_or("").trim();
+        if code.is_empty() {
+            continue;
+        }
+        items.push(format!("{{\"code\":\"{}\",\"name\":\"{}\"}}", esc(code), esc(name)));
+    }
+    format!("{{\"ok\":true,\"layouts\":[{}]}}", items.join(","))
 }
 
 fn status_json(config_path: &str) -> String {

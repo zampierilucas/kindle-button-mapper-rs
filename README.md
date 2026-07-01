@@ -10,6 +10,7 @@ A Rust-based Linux input device event mapper for Kindle e-readers. Maps button p
 - Debouncing to prevent double-triggers
 - Auto-reconnect on device disconnect
 - Optional exclusive device grab
+- Per-keyboard XKB layout, re-applied on every reconnect
 
 ## Building
 
@@ -40,6 +41,7 @@ INI format configuration file:
 name = "Device Name"
 # path = /dev/input/event2
 grab = true
+# keyboard_layout = fr   # XKB layout re-applied whenever this keyboard connects
 
 [settings]
 debounce_ms = 200
@@ -68,6 +70,8 @@ on_disconnect = /path/to/script.sh
 [triggers_longpress]
 # lt/rt = /path/to/script.sh
 ```
+
+Set `keyboard_layout` to an XKB layout code (e.g. `fr`, `de`, `ro`, `fr(oss)`) to remap a Bluetooth keyboard. The mapper re-applies it on every connect via `scripts/setlayout.sh`, so the layout survives reconnects instead of reverting to US. Leave it unset to keep the system default.
 
 Use `log_buttons = true` to discover button codes for your device.
 

@@ -150,6 +150,10 @@ fn device_worker(cfg: config::DeviceConfig, settings: WorkerSettings) {
                     info!("[{}] running on_connect script", cfg.id);
                     execute_script(script);
                 }
+                if let Some(ref layout) = cfg.keyboard_layout {
+                    info!("[{}] applying keyboard layout '{}'", cfg.id, layout);
+                    apply_keyboard_layout(layout);
+                }
                 if let Err(e) = run_event_loop(&mut device, &mut mapper, cfg.grab, settings.keep_awake) {
                     error!("[{}] event loop error: {}", cfg.id, e);
                     if let Some(ref script) = settings.on_disconnect {
@@ -283,5 +287,27 @@ fn execute_script(script: &str) {
         Err(e) => {
             error!("Failed to execute '{}': {}", script, e);
         }
+    }
+}
+
+const SETLAYOUT_FALLBACK: &str = "/mnt/us/kindle-button-mapper/scripts/setlayout.sh";
+
+/// Path to the bundled setlayout.sh, resolved next to the running binary.
+fn setlayout_script() -> std::path::PathBuf {
+    env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("scripts/setlayout.sh")))
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| std::path::PathBuf::from(SETLAYOUT_FALLBACK))
+}
+
+/// Apply the given XKB layout code via the bundled setlayout.sh.
+fn apply_keyboard_layout(layout: &str) {
+    let script = setlayout_script();
+    match Command::new("/bin/sh").arg(&script).arg(layout).spawn() {
+        Ok(mut child) => {
+            let _ = child.wait();
+        }
+        Err(e) => error!("Failed to apply keyboard layout '{}': {}", layout, e),
     }
 }
