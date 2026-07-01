@@ -816,7 +816,7 @@ var MapperManager = (function() {
         getEl("devDetailName").value = prefillName || "";
         getEl("devDetailUniq").value = prefillUniq || "";
         getEl("devDetailGrab").className = "toggle";
-        populateLayoutSelect("");
+        setDeviceLayout("");
         getEl("btnDeviceDelete").style.display = "none";
         updateDeviceIdView();
         showOverlay("deviceDetailOverlay");
@@ -829,7 +829,7 @@ var MapperManager = (function() {
         getEl("devDetailUniq").value = getValue("device." + id, "uniq") || "";
         var grab = (getValue("device." + id, "grab") || "").toLowerCase() === "true";
         getEl("devDetailGrab").className = "toggle" + (grab ? " on" : "");
-        populateLayoutSelect(getValue("device." + id, "keyboard_layout") || "");
+        setDeviceLayout(getValue("device." + id, "keyboard_layout") || "");
         getEl("btnDeviceDelete").style.display = "block";
         getEl("devDetailIdView").innerHTML = escapeHtml(id);
         showOverlay("deviceDetailOverlay");
@@ -871,7 +871,7 @@ var MapperManager = (function() {
             return;
         }
 
-        var layout = (getEl("devDetailLayout").value || "").replace(/^\s+|\s+$/g, "");
+        var layout = getEl("devDetailLayout").getAttribute("data-code") || "";
 
         setValue("device." + newId, "name", name);
         setValue("device." + newId, "grab", grab);
@@ -1090,6 +1090,14 @@ var MapperManager = (function() {
         var search = getEl("actionSearch");
         search.addEventListener("input", onActionSearchInput, false);
         search.addEventListener("keyup", onActionSearchInput, false);
+
+        getEl("devDetailLayout").addEventListener("click", openLayoutPicker, false);
+        getEl("layoutList").addEventListener("click", onLayoutItemClick, false);
+        getEl("btnLayoutCancel").addEventListener("click", function() { hideOverlay("layoutOverlay"); }, false);
+        var layoutSearch = getEl("layoutSearch");
+        var onLayoutSearch = function() { renderLayoutList(getEl("layoutSearch").value); };
+        layoutSearch.addEventListener("input", onLayoutSearch, false);
+        layoutSearch.addEventListener("keyup", onLayoutSearch, false);
     }
 
     function sizeTabContent() {
@@ -1137,23 +1145,51 @@ var MapperManager = (function() {
         });
     }
 
-    function populateLayoutSelect(selected) {
-        var sel = getEl("devDetailLayout");
-        selected = selected || "";
-        var html = '<option value="">(system default)</option>';
-        var hasSelected = !selected;
+    function layoutLabel(code) {
+        if (!code) return "(system default)";
+        for (var i = 0; i < layouts.length; i++) {
+            if (layouts[i].code === code) return (layouts[i].name || code) + " (" + code + ")";
+        }
+        return code;
+    }
+
+    function setDeviceLayout(code) {
+        code = code || "";
+        var btn = getEl("devDetailLayout");
+        btn.setAttribute("data-code", code);
+        btn.innerHTML = escapeHtml(layoutLabel(code));
+    }
+
+    function renderLayoutList(query) {
+        query = (query || "").toLowerCase().replace(/^\s+|\s+$/g, "");
+        var html = "";
+        if (!query) html += '<div class="action-item" data-code="">(system default)</div>';
         for (var i = 0; i < layouts.length; i++) {
             var code = layouts[i].code;
             var name = layouts[i].name || code;
-            if (code === selected) hasSelected = true;
-            html += '<option value="' + escapeHtml(code) + '">' + escapeHtml(code) + ' — ' + escapeHtml(name) + '</option>';
+            if (query && code.toLowerCase().indexOf(query) < 0 && name.toLowerCase().indexOf(query) < 0) continue;
+            html += '<div class="action-item" data-code="' + escapeHtml(code) + '">'
+                + escapeHtml(name) + ' <span class="action-id">' + escapeHtml(code) + '</span></div>';
         }
-        // Preserve a stored value (e.g. a variant like fr(oss)) not in the base list.
-        if (!hasSelected) {
-            html += '<option value="' + escapeHtml(selected) + '">' + escapeHtml(selected) + '</option>';
+        var list = getEl("layoutList");
+        list.innerHTML = html;
+        list.scrollTop = 0;
+    }
+
+    function openLayoutPicker() {
+        getEl("layoutSearch").value = "";
+        renderLayoutList("");
+        showOverlay("layoutOverlay");
+    }
+
+    function onLayoutItemClick(e) {
+        var target = e.target;
+        while (target && target.getAttribute && target.getAttribute("data-code") === null) {
+            target = target.parentNode;
         }
-        sel.innerHTML = html;
-        sel.value = selected;
+        if (!target || !target.getAttribute) return;
+        setDeviceLayout(target.getAttribute("data-code"));
+        hideOverlay("layoutOverlay");
     }
 
     function init() {
