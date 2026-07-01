@@ -34,15 +34,10 @@ Enable debug logging with `RUST_LOG=debug`.
 
 ## Configuration
 
-INI format configuration file:
+INI format configuration file. Each device is its own `[device.ID]` block with
+`[device.ID.{kind}]` subsections for the mappings:
 
 ```ini
-[device]
-name = "Device Name"
-# path = /dev/input/event2
-grab = true
-# keyboard_layout = fr   # XKB layout re-applied whenever this keyboard connects
-
 [settings]
 debounce_ms = 200
 long_press_ms = 500
@@ -52,24 +47,34 @@ keep_awake = true
 on_connect = /path/to/script.sh
 on_disconnect = /path/to/script.sh
 
-[buttons]
+[device.gamepad]
+name = Device Name
+uniq = AA:BB:CC:DD:EE:FF   # Bluetooth MAC; matched first when set
+grab = true
+# keyboard_layout = fr     # XKB layout re-applied whenever this keyboard connects
+
+[device.gamepad.buttons]
 # button_code = /path/to/script.sh
 
-[longpress]
+[device.gamepad.longpress]
 # button_code = /path/to/script.sh
 
-[dpad]
+[device.gamepad.dpad]
 # up/down/left/right = /path/to/script.sh
 
-[dpad_longpress]
+[device.gamepad.dpad_longpress]
 # up/down/left/right = /path/to/script.sh
 
-[triggers]
+[device.gamepad.triggers]
 # lt/rt = /path/to/script.sh
 
-[triggers_longpress]
+[device.gamepad.triggers_longpress]
 # lt/rt = /path/to/script.sh
 ```
+
+Devices are matched by identity, never by `/dev/input/eventX` path (that index is
+unstable across reconnects): the mapper uses the Bluetooth MAC (`uniq`) when set,
+otherwise the device `name`. Set at least one.
 
 Set `keyboard_layout` to an XKB layout code (e.g. `fr`, `de`, `ro`, `fr(oss)`) to remap a Bluetooth keyboard. The mapper re-applies it on every connect, so the layout survives reconnects instead of reverting to US. Leave it unset to keep the system default.
 
@@ -95,7 +100,7 @@ ssh kindle "sh /mnt/us/kindle-button-mapper/illusion/install-waf-app.sh"   # fir
 
 The app has three tabs:
 - **Bindings** — list of current button / D-pad / trigger mappings per device. Tap *+ Add* to capture a button and pick an action. Each binding can map to a KOReader command, a keyboard key, or a custom shell command.
-- **Device** — list of configured devices. Add, edit, or remove devices and their `/dev/input/eventX` paths.
+- **Device** — list of configured devices, each matched by its Bluetooth MAC or name. Add, edit, or remove a device, or tap one seen on `/dev/input` to prefill its name and MAC.
 - **Debug** — live button capture for discovering codes, and a raw `config.ini` editor.
 
 ## Install from source
