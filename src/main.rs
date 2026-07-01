@@ -290,21 +290,11 @@ fn execute_script(script: &str) {
     }
 }
 
-const SETLAYOUT_FALLBACK: &str = "/mnt/us/kindle-button-mapper/scripts/setlayout.sh";
-
-/// Path to the bundled setlayout.sh, resolved next to the running binary.
-fn setlayout_script() -> std::path::PathBuf {
-    env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join("scripts/setlayout.sh")))
-        .filter(|p| p.exists())
-        .unwrap_or_else(|| std::path::PathBuf::from(SETLAYOUT_FALLBACK))
-}
+const SETLAYOUT_SCRIPT: &str = "/mnt/us/kindle-button-mapper/scripts/setlayout.sh";
 
 /// Apply the given XKB layout code via the bundled setlayout.sh.
 fn apply_keyboard_layout(layout: &str) {
-    let script = setlayout_script();
-    match Command::new("/bin/sh").arg(&script).arg(layout).spawn() {
+    match Command::new("/bin/sh").arg(SETLAYOUT_SCRIPT).arg(layout).spawn() {
         Ok(mut child) => {
             let _ = child.wait();
         }
