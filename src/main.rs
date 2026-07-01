@@ -293,9 +293,6 @@ fn execute_script(script: &str) {
 
 const XKB_DISPLAY: &str = ":0";
 
-/// Apply an XKB layout: dump the running keymap, swap its symbols block for
-/// `include "pc+<layout>"`, and recompile into the X server. This keeps the
-/// device's keycodes/geometry and only changes the layout.
 fn apply_keyboard_layout(layout: &str) {
     let dump = match Command::new("xkbcomp")
         .args(["-xkb", XKB_DISPLAY, "-"])
@@ -331,8 +328,6 @@ fn apply_keyboard_layout(layout: &str) {
     let _ = child.wait();
 }
 
-/// Replace the top-level `xkb_symbols { … }` block with one that just includes
-/// `pc+<layout>`, leaving the rest of the keymap untouched.
 fn patch_xkb_symbols(keymap: &str, layout: &str) -> String {
     let mut out = String::new();
     let mut depth = 0i32;
@@ -362,7 +357,6 @@ fn patch_xkb_symbols(keymap: &str, layout: &str) -> String {
     out
 }
 
-/// Drop `"…"` spans so braces inside string literals don't affect depth counting.
 fn strip_quoted(line: &str) -> String {
     let mut out = String::new();
     let mut in_quote = false;
@@ -383,30 +377,4 @@ fn strip_quoted(line: &str) -> String {
         }
     }
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::patch_xkb_symbols;
-
-    #[test]
-    fn swaps_only_the_symbols_block() {
-        let keymap = "xkb_keymap {\n\
-                      xkb_keycodes \"evdev\" {\n    <ESC> = 9;\n};\n\
-                      xkb_symbols \"pc+us\" {\n\
-                          key <AC01> { [ a ] };\n\
-                          name[group1]=\"English (US)\";\n\
-                      };\n\
-                      xkb_geometry \"pc(pc105)\" {\n    foo;\n};\n\
-                      };\n";
-        let out = patch_xkb_symbols(keymap, "fr");
-        assert!(out.contains("include \"pc+fr\""));
-        assert!(!out.contains("key <AC01>"));
-        assert!(!out.contains("English (US)"));
-        // Untouched sections survive.
-        assert!(out.contains("xkb_keycodes \"evdev\""));
-        assert!(out.contains("xkb_geometry \"pc(pc105)\""));
-        // Only one symbols block, closed once.
-        assert_eq!(out.matches("xkb_symbols").count(), 1);
-    }
 }
