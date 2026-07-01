@@ -294,23 +294,15 @@ fn execute_script(script: &str) {
 const XKB_DISPLAY: &str = ":0";
 
 fn apply_keyboard_layout(layout: &str) {
-    let dump = match Command::new("xkbcomp")
-        .args(["-xkb", XKB_DISPLAY, "-"])
-        .output()
-    {
-        Ok(o) if o.status.success() => o.stdout,
-        Ok(o) => {
-            error!("xkbcomp dump failed: {}", String::from_utf8_lossy(&o.stderr).trim());
-            return;
-        }
-        Err(e) => {
-            error!("xkbcomp not runnable: {}", e);
-            return;
-        }
-    };
-
-    let patched = patch_xkb_symbols(&String::from_utf8_lossy(&dump), layout);
-
+    let keymap = format!(
+        "xkb_keymap {{\n\
+         \x20 xkb_keycodes {{ include \"evdev+aliases(qwerty)\" }};\n\
+         \x20 xkb_types {{ include \"complete\" }};\n\
+         \x20 xkb_compat {{ include \"complete\" }};\n\
+         \x20 xkb_symbols {{ include \"pc+{layout}\" }};\n\
+         \x20 xkb_geometry {{ include \"pc(pc105)\" }};\n\
+         }};\n"
+    );
     let mut child = match Command::new("xkbcomp")
         .args(["-I/usr/share/X11/xkb", "-", XKB_DISPLAY])
         .stdin(Stdio::piped())
@@ -318,63 +310,12 @@ fn apply_keyboard_layout(layout: &str) {
     {
         Ok(c) => c,
         Err(e) => {
-            error!("xkbcomp compile failed to start: {}", e);
+            error!("xkbcomp failed to start: {}", e);
             return;
         }
     };
     if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(patched.as_bytes());
+        let _ = stdin.write_all(keymap.as_bytes());
     }
     let _ = child.wait();
-}
-
-fn patch_xkb_symbols(keymap: &str, layout: &str) -> String {
-    let mut out = String::new();
-    let mut depth = 0i32;
-    let mut skipping = false;
-    let mut replaced = false;
-    for line in keymap.lines() {
-        if !replaced && line.trim_start().starts_with("xkb_symbols") && line.contains('{') {
-            out.push_str("xkb_symbols {\n");
-            out.push_str(&format!("  include \"pc+{}\"\n", layout));
-            out.push_str("};\n");
-            depth = 1;
-            skipping = true;
-            replaced = true;
-            continue;
-        }
-        if skipping {
-            let bare = strip_quoted(line);
-            depth += bare.matches('{').count() as i32 - bare.matches('}').count() as i32;
-            if depth <= 0 {
-                skipping = false;
-            }
-            continue;
-        }
-        out.push_str(line);
-        out.push('\n');
-    }
-    out
-}
-
-fn strip_quoted(line: &str) -> String {
-    let mut out = String::new();
-    let mut in_quote = false;
-    let mut escaped = false;
-    for c in line.chars() {
-        if in_quote {
-            if escaped {
-                escaped = false;
-            } else if c == '\\' {
-                escaped = true;
-            } else if c == '"' {
-                in_quote = false;
-            }
-        } else if c == '"' {
-            in_quote = true;
-        } else {
-            out.push(c);
-        }
-    }
-    out
 }
