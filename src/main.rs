@@ -13,9 +13,10 @@ use mapper::Mapper;
 use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::signal::{signal, SigHandler, Signal};
 use std::env;
+use std::io::Write;
 use std::os::fd::BorrowedFd;
 use std::os::unix::io::AsRawFd;
-use std::process::{self, Command};
+use std::process::{self, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -290,14 +291,122 @@ fn execute_script(script: &str) {
     }
 }
 
-const SETLAYOUT_SCRIPT: &str = "/mnt/us/kindle-button-mapper/scripts/setlayout.sh";
+const XKB_DISPLAY: &str = ":0";
 
-/// Apply the given XKB layout code via the bundled setlayout.sh.
+/// Apply an XKB layout: dump the running keymap, swap its symbols block for
+/// `include "pc+<layout>"`, and recompile into the X server. This keeps the
+/// device's keycodes/geometry and only changes the layout.
 fn apply_keyboard_layout(layout: &str) {
-    match Command::new("/bin/sh").arg(SETLAYOUT_SCRIPT).arg(layout).spawn() {
-        Ok(mut child) => {
-            let _ = child.wait();
+    let dump = match Command::new("xkbcomp")
+        .args(["-xkb", XKB_DISPLAY, "-"])
+        .output()
+    {
+        Ok(o) if o.status.success() => o.stdout,
+        Ok(o) => {
+            error!("xkbcomp dump failed: {}", String::from_utf8_lossy(&o.stderr).trim());
+            return;
         }
-        Err(e) => error!("Failed to apply keyboard layout '{}': {}", layout, e),
+        Err(e) => {
+            error!("xkbcomp not runnable: {}", e);
+            return;
+        }
+    };
+
+    let patched = patch_xkb_symbols(&String::from_utf8_lossy(&dump), layout);
+
+    let mut child = match Command::new("xkbcomp")
+        .args(["-I/usr/share/X11/xkb", "-", XKB_DISPLAY])
+        .stdin(Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            error!("xkbcomp compile failed to start: {}", e);
+            return;
+        }
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(patched.as_bytes());
+    }
+    let _ = child.wait();
+}
+
+/// Replace the top-level `xkb_symbols { … }` block with one that just includes
+/// `pc+<layout>`, leaving the rest of the keymap untouched.
+fn patch_xkb_symbols(keymap: &str, layout: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0i32;
+    let mut skipping = false;
+    let mut replaced = false;
+    for line in keymap.lines() {
+        if !replaced && line.trim_start().starts_with("xkb_symbols") && line.contains('{') {
+            out.push_str("xkb_symbols {\n");
+            out.push_str(&format!("  include \"pc+{}\"\n", layout));
+            out.push_str("};\n");
+            depth = 1;
+            skipping = true;
+            replaced = true;
+            continue;
+        }
+        if skipping {
+            let bare = strip_quoted(line);
+            depth += bare.matches('{').count() as i32 - bare.matches('}').count() as i32;
+            if depth <= 0 {
+                skipping = false;
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
+}
+
+/// Drop `"…"` spans so braces inside string literals don't affect depth counting.
+fn strip_quoted(line: &str) -> String {
+    let mut out = String::new();
+    let mut in_quote = false;
+    let mut escaped = false;
+    for c in line.chars() {
+        if in_quote {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_quote = false;
+            }
+        } else if c == '"' {
+            in_quote = true;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::patch_xkb_symbols;
+
+    #[test]
+    fn swaps_only_the_symbols_block() {
+        let keymap = "xkb_keymap {\n\
+                      xkb_keycodes \"evdev\" {\n    <ESC> = 9;\n};\n\
+                      xkb_symbols \"pc+us\" {\n\
+                          key <AC01> { [ a ] };\n\
+                          name[group1]=\"English (US)\";\n\
+                      };\n\
+                      xkb_geometry \"pc(pc105)\" {\n    foo;\n};\n\
+                      };\n";
+        let out = patch_xkb_symbols(keymap, "fr");
+        assert!(out.contains("include \"pc+fr\""));
+        assert!(!out.contains("key <AC01>"));
+        assert!(!out.contains("English (US)"));
+        // Untouched sections survive.
+        assert!(out.contains("xkb_keycodes \"evdev\""));
+        assert!(out.contains("xkb_geometry \"pc(pc105)\""));
+        // Only one symbols block, closed once.
+        assert_eq!(out.matches("xkb_symbols").count(), 1);
     }
 }

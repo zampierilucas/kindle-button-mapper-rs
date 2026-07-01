@@ -71,7 +71,7 @@ on_disconnect = /path/to/script.sh
 # lt/rt = /path/to/script.sh
 ```
 
-Set `keyboard_layout` to an XKB layout code (e.g. `fr`, `de`, `ro`, `fr(oss)`) to remap a Bluetooth keyboard. The mapper re-applies it on every connect via `scripts/setlayout.sh`, so the layout survives reconnects instead of reverting to US. Leave it unset to keep the system default.
+Set `keyboard_layout` to an XKB layout code (e.g. `fr`, `de`, `ro`, `fr(oss)`) to remap a Bluetooth keyboard. The mapper re-applies it on every connect, so the layout survives reconnects instead of reverting to US. Leave it unset to keep the system default.
 
 Use `log_buttons = true` to discover button codes for your device.
 
