@@ -83,7 +83,7 @@ Use `log_buttons = true` to discover button codes for your device.
 |---|---|---|---|
 | ![Bindings](docs/screenshots/bindings.png) | ![Device](docs/screenshots/device.png) | ![Debug](docs/screenshots/debug.png) | ![Action picker](docs/screenshots/action-picker.png) |
 
-A touchscreen UI for editing mappings without SSH lives in `illusion/MapperManager/`. The daemon stays a plain runtime — the WAF app spawns a `--waf-helper` HTTP server (localhost:8322) only while the app is open, edits `config.ini`, and restarts the daemon via `/etc/init.d/kindle-button-mapper restart`.
+A touchscreen UI for editing mappings without SSH lives in `illusion/MapperManager/`. The daemon stays a plain runtime — the WAF app spawns a `--waf-helper` HTTP server (localhost:8322) only while the app is open, edits `config.ini`, and restarts the daemon via `initctl restart kindle-button-mapper`.
 
 Deploy and register:
 

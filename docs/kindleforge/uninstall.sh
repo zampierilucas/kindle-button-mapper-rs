@@ -1,18 +1,12 @@
 #!/bin/sh
+
 set -e
 
 INSTALL_DIR=/mnt/us/kindle-button-mapper
 APPREG_DB=/var/local/appreg.db
-APP_ID=com.lzampier.mappermanager
+APP_ID="com.lzampier.mappermanager"
 
 /sbin/initctl stop kindle-button-mapper 2>/dev/null || true
-
-# Helper + WAF mesquite — release any handles still open on the install dir.
-lipc-set-prop com.lab126.appmgrd start app://com.lab126.booklet.home 2>/dev/null || true
-pkill -TERM -f mesquite.*mappermanager 2>/dev/null || true
-kill "$(cat /tmp/kindle-button-mapper-waf.pid 2>/dev/null)" 2>/dev/null || true
-pkill -f waf-helper 2>/dev/null || true
-sleep 1
 
 /usr/sbin/mntroot rw
 
@@ -31,4 +25,4 @@ fi
 rm -rf "$INSTALL_DIR"
 rm -f /mnt/us/documents/MapperManager.sh
 
-echo "Uninstalled."
+exit 0

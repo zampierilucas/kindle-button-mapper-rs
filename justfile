@@ -45,7 +45,7 @@ clean:
 deploy: build-kindle
     @echo "Deploying to Kindle..."
     @echo "Stopping daemon..."
-    -ssh kindle "/etc/init.d/kindle-button-mapper stop" 2>/dev/null || true
+    -ssh kindle "/sbin/initctl stop kindle-button-mapper" 2>/dev/null || true
     @echo "Remounting filesystems as writable..."
     ssh kindle "/usr/sbin/mntroot rw && mount -o remount,rw /mnt/base-us"
     @echo "Creating directories..."
@@ -58,38 +58,27 @@ deploy: build-kindle
     ssh kindle "test -f /mnt/us/kindle-button-mapper/config.ini" || scp config.ini kindle:/mnt/us/kindle-button-mapper/
     scp scripts/*.sh kindle:/mnt/us/kindle-button-mapper/scripts/
     ssh kindle "chmod +x /mnt/us/kindle-button-mapper/scripts/*.sh"
-    scp kindle-button-mapper.init kindle:/etc/init.d/kindle-button-mapper
-    ssh kindle "chmod +x /etc/init.d/kindle-button-mapper"
+    scp assets/kindle-button-mapper.upstart kindle:/etc/upstart/kindle-button-mapper.conf
     @echo "Deployment complete!"
     @echo ""
     @echo "Start daemon with: just start"
     @echo "View logs with: just logs"
 
-# Enable autostart on boot (adds to /etc/rc.local)
-enable:
-    ssh kindle "grep -q 'kindle-button-mapper' /etc/rc.local || sed -i '/^exit 0/i /etc/init.d/kindle-button-mapper start \&' /etc/rc.local"
-    @echo "Autostart enabled!"
-
-# Disable autostart on boot (removes from /etc/rc.local)
-disable:
-    ssh kindle "sed -i '/kindle-button-mapper/d' /etc/rc.local"
-    @echo "Autostart disabled!"
-
 # Start daemon on Kindle
 start:
-    ssh kindle "/etc/init.d/kindle-button-mapper start"
+    ssh kindle "/sbin/initctl start kindle-button-mapper"
 
 # Stop daemon on Kindle
 stop:
-    ssh kindle "/etc/init.d/kindle-button-mapper stop"
+    ssh kindle "/sbin/initctl stop kindle-button-mapper"
 
 # Restart daemon on Kindle
 restart:
-    ssh kindle "/etc/init.d/kindle-button-mapper restart"
+    ssh kindle "/sbin/initctl restart kindle-button-mapper"
 
 # Check daemon status
 status:
-    ssh kindle "/etc/init.d/kindle-button-mapper status"
+    ssh kindle "/sbin/initctl status kindle-button-mapper"
 
 # Follow daemon logs
 logs:

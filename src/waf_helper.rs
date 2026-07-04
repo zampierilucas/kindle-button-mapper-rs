@@ -10,7 +10,8 @@ use std::time::{Duration, Instant};
 
 const BIND_ADDR: &str = "127.0.0.1:8322";
 const INPUT_DIR: &str = "/dev/input";
-const INIT_SCRIPT: &str = "/etc/init.d/kindle-button-mapper";
+const INITCTL: &str = "/sbin/initctl";
+const SERVICE: &str = "kindle-button-mapper";
 
 const ACTIONS: &[(&str, &str)] = &[
     ("next_page", "Next page"),
@@ -419,30 +420,30 @@ fn capture(query: &std::collections::HashMap<String, String>) -> (u16, String) {
     (200, json_err("timeout"))
 }
 
-fn run_init_script(action: &str) -> (u16, String) {
-    match Command::new(INIT_SCRIPT).arg(action).status() {
+fn run_initctl(action: &str) -> (u16, String) {
+    match Command::new(INITCTL).args([action, SERVICE]).status() {
         Ok(s) if s.success() => (200, json_ok()),
         Ok(s) => (
             500,
             json_err(&format!("{} exited with {}", action, s.code().unwrap_or(-1))),
         ),
         Err(e) => {
-            error!("init script {}: {}", action, e);
-            (500, json_err(&format!("init script: {}", e)))
+            error!("initctl {}: {}", action, e);
+            (500, json_err(&format!("initctl: {}", e)))
         }
     }
 }
 
 fn reload_daemon() -> (u16, String) {
-    run_init_script("restart")
+    run_initctl("restart")
 }
 
 fn stop_daemon() -> (u16, String) {
-    run_init_script("stop")
+    run_initctl("stop")
 }
 
 fn start_daemon() -> (u16, String) {
-    run_init_script("start")
+    run_initctl("start")
 }
 
 // ---- JSON helpers ----

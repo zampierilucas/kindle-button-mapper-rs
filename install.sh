@@ -15,10 +15,10 @@ if [ ! -x "$BIN" ]; then
     exit 1
 fi
 
-mkdir -p "$INSTALL_DIR/scripts" "$INSTALL_DIR/illusion/MapperManager"
+mkdir -p "$INSTALL_DIR/scripts" "$INSTALL_DIR/illusion/MapperManager" "$INSTALL_DIR/assets"
 
 cp "$BIN" "$INSTALL_DIR/kindle-button-mapper"
-cp "$SRC_DIR/kindle-button-mapper.init" "$INSTALL_DIR/"
+cp "$SRC_DIR/assets/kindle-button-mapper.upstart" "$INSTALL_DIR/assets/"
 cp "$SRC_DIR/uninstall.sh" "$INSTALL_DIR/"
 [ -f "$INSTALL_DIR/config.ini" ] || cp "$SRC_DIR/config.ini" "$INSTALL_DIR/"
 cp "$SRC_DIR/scripts/"*.sh "$INSTALL_DIR/scripts/"
@@ -27,15 +27,13 @@ cp "$SRC_DIR/illusion/MapperManager.sh" "$SRC_DIR/illusion/install-waf-app.sh" "
 cp "$SRC_DIR/illusion/MapperManager/"* "$INSTALL_DIR/illusion/MapperManager/"
 
 chmod +x "$INSTALL_DIR/kindle-button-mapper" \
-         "$INSTALL_DIR/kindle-button-mapper.init" \
          "$INSTALL_DIR/uninstall.sh" \
          "$INSTALL_DIR/scripts/"*.sh \
          "$INSTALL_DIR/illusion/"*.sh
 
 /usr/sbin/mntroot rw
 
-cp "$INSTALL_DIR/kindle-button-mapper.init" /etc/init.d/kindle-button-mapper
-chmod +x /etc/init.d/kindle-button-mapper
+cp "$INSTALL_DIR/assets/kindle-button-mapper.upstart" /etc/upstart/kindle-button-mapper.conf
 
 cp "$INSTALL_DIR/illusion/MapperManager.sh" /mnt/us/documents/MapperManager.sh
 chmod +x /mnt/us/documents/MapperManager.sh
@@ -44,7 +42,7 @@ sh "$INSTALL_DIR/illusion/install-waf-app.sh" || true
 
 /usr/sbin/mntroot ro || true
 
-/etc/init.d/kindle-button-mapper restart || /etc/init.d/kindle-button-mapper start
+/sbin/initctl restart kindle-button-mapper || /sbin/initctl start kindle-button-mapper
 
 echo "Installed. Open Button Mapper from the Kindle library or via:"
 echo "  lipc-set-prop com.lab126.appmgrd start app://com.lzampier.mappermanager"

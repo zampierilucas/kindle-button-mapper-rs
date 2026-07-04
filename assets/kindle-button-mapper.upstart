@@ -1,0 +1,13 @@
+# Kindle Button Mapper - maps hardware buttons to custom actions
+# For use with the pre-built binary from releases
+start on started wmt
+stop on stopping filesystems
+
+respawn
+respawn limit 5 60
+
+console none
+
+script
+    exec /mnt/us/kindle-button-mapper/kindle-button-mapper /mnt/us/kindle-button-mapper/config.ini >>/var/log/kindle-button-mapper.log 2>&1
+end script
