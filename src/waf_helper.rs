@@ -99,8 +99,12 @@ fn route(method: &str, path: &str, body: &str, config_path: &str) -> (u16, Strin
         ("POST", "/quit") => {
             std::thread::spawn(|| {
                 std::thread::sleep(Duration::from_millis(100));
-                let _ = Command::new("pkill")
-                    .args(["-TERM", "-f", "mesquite.*mappermanager"])
+                let _ = Command::new("lipc-set-prop")
+                    .args([
+                        "com.lab126.appmgrd",
+                        "stop",
+                        "app://com.lzampier.mappermanager",
+                    ])
                     .status();
                 std::process::exit(0);
             });
