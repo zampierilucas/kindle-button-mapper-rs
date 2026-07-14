@@ -978,31 +978,10 @@ var MapperManager = (function() {
 
     function closeLogs() { hideOverlay("logsOverlay"); }
 
-    // ---- Quit ----
-
-    function quit() {
-        // Ask the helper to exit so we don't leave an HTTP socket bound.
-        postJSON("/quit", "", function() {});
-        if (typeof kindle !== "undefined" && kindle.appmgr) {
-            if (kindle.appmgr.startApplication) {
-                kindle.appmgr.startApplication("com.lab126.booklet.home");
-                return;
-            }
-            if (kindle.appmgr.back) {
-                kindle.appmgr.back();
-                return;
-            }
-        }
-        // Last-ditch fallback for firmwares where neither API is exposed:
-        // ask the helper to shoot the WAF via lipc.
-        request("POST", "/exit-app", null, function() {});
-    }
-
     // ---- Init ----
 
     function bindEvents() {
         bindTabs();
-        getEl("btnBack").addEventListener("click", quit, false);
         getEl("btnAdd").addEventListener("click", openAddPicker, false);
         getEl("btnAddCancel").addEventListener("click", closeAddPicker, false);
         getEl("btnSave").addEventListener("click", saveAndApply, false);

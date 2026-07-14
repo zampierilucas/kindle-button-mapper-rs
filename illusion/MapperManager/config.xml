@@ -10,7 +10,7 @@
     <content src="index.html" />
 
     <kindle:chrome>
-        <kindle:asset key="configureSearchBar" value="none" />
+        <kindle:asset key="configureSearchBar" value="system" />
     </kindle:chrome>
 
     <kindle:gestures>
