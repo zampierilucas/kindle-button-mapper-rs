@@ -76,7 +76,9 @@ Devices are matched by identity, never by `/dev/input/eventX` path (that index i
 unstable across reconnects): the mapper uses the Bluetooth MAC (`uniq`) when set,
 otherwise the device `name`. Set at least one.
 
-Set `keyboard_layout` to an XKB layout code (e.g. `fr`, `de`, `ro`, `fr(oss)`) to remap a Bluetooth keyboard. The mapper re-applies it on every connect, so the layout survives reconnects instead of reverting to US. Leave it unset to keep the system default.
+Set `keyboard_layout` to an XKB layout code (e.g. `fr`, `de`, `ro`, `fr(oss)`) to remap a Bluetooth keyboard. The mapper re-applies it on every connect, so the layout survives reconnects instead of reverting to US. Leave it unset to keep the system default. The layout is loaded onto both the core keyboard and each keyboard device, so the framework UI (an XInput2 client) decodes it and not just X apps.
+
+The value is spliced into the XKB symbols include as `pc+<value>`, so multi-layout switching works by passing the raw include form, e.g. `keyboard_layout = ru+kz:2+group(alt_shift_toggle)` puts `ru` on group 1, `kz` on group 2, and toggles with Alt+Shift. Configure this in the INI file — live switching from the on-device app is not supported.
 
 Use `log_buttons = true` to discover button codes for your device.
 
