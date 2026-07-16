@@ -1,24 +1,34 @@
 mod config;
 mod input;
+mod layout;
 mod mapper;
 mod pause;
 mod vkeyboard;
 mod waf_helper;
 
 use config::Config;
-use evdev::InputEventKind;
+use evdev::uinput::VirtualDevice;
+use evdev::{EventType, InputEvent, InputEventKind};
 use input::InputHandler;
+use layout::LayoutAsserter;
 use log::{error, info, warn};
 use mapper::Mapper;
 use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::signal::{signal, SigHandler, Signal};
 use std::env;
-use std::io::Write;
 use std::os::fd::BorrowedFd;
 use std::os::unix::io::AsRawFd;
-use std::process::{self, Command, Stdio};
+use std::process::{self, Command};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+/// A key that isn't seen again within this gap starts a new "burst". The
+/// framework re-pins `us` on focus-in, so we re-assert the layout at burst
+/// start (not per key, to leave in-layout group toggling alone).
+const BURST_GAP: Duration = Duration::from_millis(400);
+
+type SharedKeyboard = Option<Arc<Mutex<VirtualDevice>>>;
 
 const KEEP_AWAKE_INTERVAL: Duration = Duration::from_secs(60);
 const KEEP_AWAKE_POKE: &str = "lipc-set-prop -i com.lab126.powerd touchScreenSaverTimeout 1";
@@ -89,7 +99,7 @@ fn main() {
     // Virtual keyboard via uinput — kept alive for the daemon's lifetime.
     // The path is written to /var/run/kindle-button-mapper-key-target so
     // scripts/key.sh can inject events into it.
-    let _vkeyboard = vkeyboard::try_init();
+    let vkeyboard: SharedKeyboard = vkeyboard::try_init().map(|d| Arc::new(Mutex::new(d)));
 
     let mut handles = Vec::new();
     let settings = WorkerSettings {
@@ -104,9 +114,10 @@ fn main() {
     for device in config.devices {
         let id = device.id.clone();
         let settings = settings.clone();
+        let vkbd = vkeyboard.clone();
         let h = thread::Builder::new()
             .name(format!("dev:{}", id))
-            .spawn(move || device_worker(device, settings))
+            .spawn(move || device_worker(device, settings, vkbd))
             .expect("spawn device thread");
         handles.push(h);
     }
@@ -133,7 +144,7 @@ struct WorkerSettings {
     on_disconnect: Option<String>,
 }
 
-fn device_worker(cfg: config::DeviceConfig, settings: WorkerSettings) {
+fn device_worker(cfg: config::DeviceConfig, settings: WorkerSettings, vkeyboard: SharedKeyboard) {
     let mut mapper = Mapper::new(
         &cfg,
         settings.debounce_ms,
@@ -141,6 +152,17 @@ fn device_worker(cfg: config::DeviceConfig, settings: WorkerSettings) {
         settings.repeat_ms,
         settings.log_buttons,
     );
+
+    // Precompile the layout once (None if unset or the symbols file is missing).
+    let mut layout = cfg
+        .keyboard_layout
+        .as_deref()
+        .and_then(|l| LayoutAsserter::new(&cfg.id, l));
+    if layout.is_none() {
+        if let Some(l) = cfg.keyboard_layout.as_deref() {
+            warn!("[{}] keyboard_layout '{}' unavailable — passthrough will use us", cfg.id, l);
+        }
+    }
 
     loop {
         let handler = InputHandler::new(cfg.name.clone(), cfg.uniq.clone(), cfg.grab);
@@ -151,11 +173,17 @@ fn device_worker(cfg: config::DeviceConfig, settings: WorkerSettings) {
                     info!("[{}] running on_connect script", cfg.id);
                     execute_script(script);
                 }
-                if let Some(ref layout) = cfg.keyboard_layout {
-                    info!("[{}] applying keyboard layout '{}'", cfg.id, layout);
-                    apply_keyboard_layout(layout);
+                if let Some(la) = layout.as_mut() {
+                    la.assert();
                 }
-                if let Err(e) = run_event_loop(&mut device, &mut mapper, cfg.grab, settings.keep_awake) {
+                if let Err(e) = run_event_loop(
+                    &mut device,
+                    &mut mapper,
+                    cfg.grab,
+                    settings.keep_awake,
+                    vkeyboard.as_ref(),
+                    layout.as_mut(),
+                ) {
                     error!("[{}] event loop error: {}", cfg.id, e);
                     if let Some(ref script) = settings.on_disconnect {
                         info!("[{}] device disconnected, running on_disconnect script", cfg.id);
@@ -172,10 +200,18 @@ fn device_worker(cfg: config::DeviceConfig, settings: WorkerSettings) {
     }
 }
 
-fn run_event_loop(device: &mut evdev::Device, mapper: &mut Mapper, grab: bool, keep_awake: bool) -> Result<(), String> {
+fn run_event_loop(
+    device: &mut evdev::Device,
+    mapper: &mut Mapper,
+    grab: bool,
+    keep_awake: bool,
+    vkeyboard: Option<&Arc<Mutex<VirtualDevice>>>,
+    mut layout: Option<&mut LayoutAsserter>,
+) -> Result<(), String> {
     // Non-blocking + poll so we can notice a capture pause while idle.
     set_nonblocking(device.as_raw_fd());
     let mut grabbed = grab;
+    let mut last_key: Option<Instant> = None;
 
     let mut last_poke: Option<Instant> = if keep_awake {
         execute_script(KEEP_AWAKE_RELEASE);
@@ -226,11 +262,34 @@ fn run_event_loop(device: &mut evdev::Device, mapper: &mut Mapper, grab: bool, k
             match event.kind() {
                 InputEventKind::Key(key) => {
                     activity = true;
-                    match event.value() {
-                        1 => mapper.handle_press(key),  // Press
-                        2 => mapper.handle_held(key),   // Held/repeat
-                        0 => mapper.handle_release(key), // Release
-                        _ => {}
+                    if mapper.is_mapped(key) {
+                        match event.value() {
+                            1 => mapper.handle_press(key),   // Press
+                            2 => mapper.handle_held(key),    // Held/repeat
+                            0 => mapper.handle_release(key), // Release
+                            _ => {}
+                        }
+                    } else if let Some(vkbd) = vkeyboard {
+                        // Unmapped key: pass it through the virtual keyboard so
+                        // the layout maps it. Re-assert the layout at burst
+                        // start — the framework re-pins us on focus-in.
+                        if event.value() == 1 {
+                            let burst_start =
+                                last_key.map_or(true, |t| t.elapsed() > BURST_GAP);
+                            if burst_start {
+                                if let Some(la) = layout.as_deref_mut() {
+                                    la.assert();
+                                }
+                            }
+                            last_key = Some(Instant::now());
+                        }
+                        if let Ok(mut d) = vkbd.lock() {
+                            let _ = d.emit(&[InputEvent::new(
+                                EventType::KEY,
+                                key.code(),
+                                event.value(),
+                            )]);
+                        }
                     }
                 }
                 InputEventKind::AbsAxis(axis) => {
@@ -291,31 +350,3 @@ fn execute_script(script: &str) {
     }
 }
 
-const XKB_DISPLAY: &str = ":0";
-
-fn apply_keyboard_layout(layout: &str) {
-    let keymap = format!(
-        "xkb_keymap {{\n\
-         \x20 xkb_keycodes {{ include \"evdev+aliases(qwerty)\" }};\n\
-         \x20 xkb_types {{ include \"complete\" }};\n\
-         \x20 xkb_compat {{ include \"complete\" }};\n\
-         \x20 xkb_symbols {{ include \"pc+{layout}\" }};\n\
-         \x20 xkb_geometry {{ include \"pc(pc105)\" }};\n\
-         }};\n"
-    );
-    let mut child = match Command::new("xkbcomp")
-        .args(["-I/usr/share/X11/xkb", "-", XKB_DISPLAY])
-        .stdin(Stdio::piped())
-        .spawn()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            error!("xkbcomp failed to start: {}", e);
-            return;
-        }
-    };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(keymap.as_bytes());
-    }
-    let _ = child.wait();
-}
