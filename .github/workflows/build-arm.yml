@@ -46,6 +46,7 @@ jobs:
         run: |
           mkdir -p output/scripts output/illusion/MapperManager output/assets
           cp target/armv7-unknown-linux-musleabihf/release/kindle-button-mapper output/
+          cp install.sh uninstall.sh config.ini output/
           cp assets/kindle-button-mapper.upstart output/assets/
           cp scripts/koreader.sh scripts/key.sh output/scripts/
           cp illusion/MapperManager.sh illusion/install-waf-app.sh output/illusion/
@@ -53,6 +54,7 @@ jobs:
              illusion/MapperManager/style.css illusion/MapperManager/script.js \
              output/illusion/MapperManager/
           chmod +x output/kindle-button-mapper \
+                   output/install.sh output/uninstall.sh \
                    output/scripts/*.sh output/illusion/*.sh
 
       - name: Show contents
@@ -75,6 +77,9 @@ jobs:
           MISSING=0
           for f in \
             kindle-button-mapper \
+            install.sh \
+            uninstall.sh \
+            config.ini \
             assets/kindle-button-mapper.upstart \
             scripts/koreader.sh \
             scripts/key.sh \

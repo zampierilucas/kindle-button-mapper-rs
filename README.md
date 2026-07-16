@@ -103,6 +103,17 @@ The app has three tabs:
 - **Device** — list of configured devices, each matched by its Bluetooth MAC or name. Add, edit, or remove a device, or tap one seen on `/dev/input` to prefill its name and MAC.
 - **Debug** — live button capture for discovering codes, and a raw `config.ini` editor.
 
+## Install from release
+
+Grab the latest `kindle-button-mapper-armv7.tar.gz` from the [releases page](https://github.com/zampierilucas/kindle-button-mapper-rs/releases), copy it to the Kindle, extract, and run the installer:
+
+```bash
+scp kindle-button-mapper-armv7.tar.gz kindle:/mnt/us/
+ssh kindle "mkdir -p /mnt/us/kbm && tar -xzf /mnt/us/kindle-button-mapper-armv7.tar.gz -C /mnt/us/kbm && sh /mnt/us/kbm/install.sh"
+```
+
+The tarball ships the pre-built ARMv7 binary, so no host toolchain or cross-compile is needed. `install.sh` detects the extracted-tarball layout automatically.
+
 ## Install from source
 
 ```bash
