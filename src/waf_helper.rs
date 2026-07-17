@@ -3,7 +3,6 @@ use log::{error, info, warn};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -294,11 +293,7 @@ fn layouts_json() -> String {
 }
 
 fn status_json(config_path: &str) -> String {
-    let pid = fs::read_to_string("/var/run/kindle-button-mapper.pid")
-        .ok()
-        .and_then(|s| s.trim().parse::<u32>().ok())
-        .unwrap_or(0);
-    let running = pid != 0 && Path::new(&format!("/proc/{}", pid)).exists();
+    let (running, pid) = daemon_status();
     format!(
         "{{\"ok\":true,\"running\":{},\"pid\":{},\"config\":\"{}\",\"version\":\"{}\",\"build\":\"{}\"}}",
         running,
@@ -422,6 +417,29 @@ fn capture(query: &std::collections::HashMap<String, String>) -> (u16, String) {
     }
     drop(lock);
     (200, json_err("timeout"))
+}
+
+// The daemon runs as an upstart service, which — unlike the old SysV init
+// script — writes no pidfile. Ask upstart directly instead of stat-ing a
+// pidfile that never gets created.
+fn daemon_status() -> (bool, u32) {
+    let output = match Command::new(INITCTL).args(["status", SERVICE]).output() {
+        Ok(o) => o,
+        Err(_) => return (false, 0),
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    // e.g. "kindle-button-mapper start/running, process 1234"
+    let running = text.contains("start/running");
+    if !running {
+        return (false, 0);
+    }
+    let pid = text
+        .rsplit("process ")
+        .next()
+        .and_then(|s| s.split_whitespace().next())
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+    (true, pid)
 }
 
 fn run_initctl(action: &str) -> (u16, String) {
