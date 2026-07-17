@@ -68,6 +68,12 @@ impl Mapper {
         }
     }
 
+    /// True if this key is bound to a script (normal or long-press). Unbound
+    /// keys are passed through to the virtual keyboard for the layout to map.
+    pub fn is_mapped(&self, key: Key) -> bool {
+        self.mappings.contains_key(&key) || self.long_press_mappings.contains_key(&key)
+    }
+
     pub fn handle_press(&mut self, key: Key) {
         // Debounce check
         if let Some(last) = self.last_press.get(&key) {

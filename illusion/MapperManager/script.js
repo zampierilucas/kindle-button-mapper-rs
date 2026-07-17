@@ -1044,7 +1044,7 @@ var MapperManager = (function() {
             showInfo("Exclusive: take sole ownership of the input device so other apps (e.g. the Kindle reader) don't also react to its events. Recommended for gamepads and remotes when you only want the mapper to handle them.");
         }, false);
         getEl("devDetailLayoutInfo").addEventListener("click", function() {
-            showInfo("Keyboard layout: pick an XKB layout re-applied every time this keyboard connects, so a non-US layout survives reconnects. Choose (system default) to leave the layout untouched.");
+            showInfo("Keyboard layout: overrides the system 'us' keymap so a non-US keyboard types correctly, even after the reader re-pins the layout. Choose (system default) to leave it untouched. For an Alt+Shift toggle between two layouts, set keyboard_layout to a comma list (e.g. us,ru) in the config editor on the Debug tab.");
         }, false);
         getEl("btnInfoClose").addEventListener("click", function() {
             hideOverlay("infoOverlay");

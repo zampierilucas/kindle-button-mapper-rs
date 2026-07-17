@@ -10,7 +10,7 @@ A Rust-based Linux input device event mapper for Kindle e-readers. Maps button p
 - Debouncing to prevent double-triggers
 - Auto-reconnect on device disconnect
 - Optional exclusive device grab
-- Per-keyboard XKB layout, re-applied on every reconnect
+- Non-US keyboard layout via XKB override, with optional Alt+Shift toggle
 
 ## Building
 
@@ -51,7 +51,7 @@ on_disconnect = /path/to/script.sh
 name = Device Name
 uniq = AA:BB:CC:DD:EE:FF   # Bluetooth MAC; matched first when set
 grab = true
-# keyboard_layout = fr     # XKB layout re-applied whenever this keyboard connects
+# keyboard_layout = fr     # XKB layout override (comma list for an Alt+Shift toggle, e.g. us,ru)
 
 [device.gamepad.buttons]
 # button_code = /path/to/script.sh
@@ -76,7 +76,9 @@ Devices are matched by identity, never by `/dev/input/eventX` path (that index i
 unstable across reconnects): the mapper uses the Bluetooth MAC (`uniq`) when set,
 otherwise the device `name`. Set at least one.
 
-Set `keyboard_layout` to an XKB layout code (e.g. `fr`, `de`, `ro`, `fr(oss)`) to remap a Bluetooth keyboard. The mapper re-applies it on every connect, so the layout survives reconnects instead of reverting to US. Leave it unset to keep the system default.
+Set `keyboard_layout` to an XKB layout code (e.g. `fr`, `de`, `ro`, `fr(oss)`) to type correctly on a non-US Bluetooth keyboard. The Kindle reader re-pins the `us` core keymap whenever an input field gains focus, so setting the layout on the running server doesn't stick; instead the mapper generates a replacement `us` symbols file and bind-mounts it over the system one, so every re-pin resolves to your layout. It's reverted when the daemon stops. Leave it unset to keep the system default.
+
+For an Alt+Shift toggle between layouts, give a comma-separated list — the first is the default group, the rest are extra groups, e.g. `keyboard_layout = us,ru`. The layout is a system-wide override, so it's taken from the first device that sets one.
 
 Use `log_buttons = true` to discover button codes for your device.
 
