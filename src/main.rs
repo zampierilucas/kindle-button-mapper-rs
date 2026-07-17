@@ -10,7 +10,7 @@ use config::Config;
 use evdev::uinput::VirtualDevice;
 use evdev::{EventType, InputEvent, InputEventKind};
 use input::InputHandler;
-use layout::LayoutAsserter;
+use layout::LayoutOverride;
 use log::{error, info, warn};
 use mapper::Mapper;
 use nix::poll::{poll, PollFd, PollFlags};
@@ -22,11 +22,6 @@ use std::process::{self, Command};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-
-/// A key that isn't seen again within this gap starts a new "burst". The
-/// framework re-pins `us` on focus-in, so we re-assert the layout at burst
-/// start (not per key, to leave in-layout group toggling alone).
-const BURST_GAP: Duration = Duration::from_millis(400);
 
 type SharedKeyboard = Option<Arc<Mutex<VirtualDevice>>>;
 
@@ -101,6 +96,17 @@ fn main() {
     // scripts/key.sh can inject events into it.
     let vkeyboard: SharedKeyboard = vkeyboard::try_init().map(|d| Arc::new(Mutex::new(d)));
 
+    // Keyboard layout is a system-wide XKB override, so it's set up once for the
+    // daemon's lifetime rather than per device. The first device that names a
+    // layout wins. Held to keep the bind-mount alive; the upstart post-stop job
+    // unmounts on stop since SIGTERM skips Drop.
+    let _layout = config
+        .devices
+        .iter()
+        .find_map(|d| d.keyboard_layout.as_deref())
+        .filter(|l| !l.is_empty())
+        .and_then(LayoutOverride::new);
+
     let mut handles = Vec::new();
     let settings = WorkerSettings {
         debounce_ms: config.debounce_ms,
@@ -153,17 +159,6 @@ fn device_worker(cfg: config::DeviceConfig, settings: WorkerSettings, vkeyboard:
         settings.log_buttons,
     );
 
-    // Precompile the layout once (None if unset or the symbols file is missing).
-    let mut layout = cfg
-        .keyboard_layout
-        .as_deref()
-        .and_then(|l| LayoutAsserter::new(&cfg.id, l));
-    if layout.is_none() {
-        if let Some(l) = cfg.keyboard_layout.as_deref() {
-            warn!("[{}] keyboard_layout '{}' unavailable — passthrough will use us", cfg.id, l);
-        }
-    }
-
     loop {
         let handler = InputHandler::new(cfg.name.clone(), cfg.uniq.clone(), cfg.grab);
         match handler.open() {
@@ -173,16 +168,12 @@ fn device_worker(cfg: config::DeviceConfig, settings: WorkerSettings, vkeyboard:
                     info!("[{}] running on_connect script", cfg.id);
                     execute_script(script);
                 }
-                if let Some(la) = layout.as_mut() {
-                    la.assert();
-                }
                 if let Err(e) = run_event_loop(
                     &mut device,
                     &mut mapper,
                     cfg.grab,
                     settings.keep_awake,
                     vkeyboard.as_ref(),
-                    layout.as_mut(),
                 ) {
                     error!("[{}] event loop error: {}", cfg.id, e);
                     if let Some(ref script) = settings.on_disconnect {
@@ -206,12 +197,10 @@ fn run_event_loop(
     grab: bool,
     keep_awake: bool,
     vkeyboard: Option<&Arc<Mutex<VirtualDevice>>>,
-    mut layout: Option<&mut LayoutAsserter>,
 ) -> Result<(), String> {
     // Non-blocking + poll so we can notice a capture pause while idle.
     set_nonblocking(device.as_raw_fd());
     let mut grabbed = grab;
-    let mut last_key: Option<Instant> = None;
 
     let mut last_poke: Option<Instant> = if keep_awake {
         execute_script(KEEP_AWAKE_RELEASE);
@@ -269,26 +258,20 @@ fn run_event_loop(
                             0 => mapper.handle_release(key), // Release
                             _ => {}
                         }
-                    } else if let Some(vkbd) = vkeyboard {
-                        // Unmapped key: pass it through the virtual keyboard so
-                        // the layout maps it. Re-assert the layout at burst
-                        // start — the framework re-pins us on focus-in.
-                        if event.value() == 1 {
-                            let burst_start =
-                                last_key.map_or(true, |t| t.elapsed() > BURST_GAP);
-                            if burst_start {
-                                if let Some(la) = layout.as_deref_mut() {
-                                    la.assert();
-                                }
+                    } else if grabbed {
+                        // The device is grabbed, so unmapped keys won't reach the
+                        // framework on their own — re-inject them through the
+                        // virtual keyboard. (When ungrabbed the framework already
+                        // sees them, so re-injecting would double every key.) The
+                        // layout override maps whichever path the keys take.
+                        if let Some(vkbd) = vkeyboard {
+                            if let Ok(mut d) = vkbd.lock() {
+                                let _ = d.emit(&[InputEvent::new(
+                                    EventType::KEY,
+                                    key.code(),
+                                    event.value(),
+                                )]);
                             }
-                            last_key = Some(Instant::now());
-                        }
-                        if let Ok(mut d) = vkbd.lock() {
-                            let _ = d.emit(&[InputEvent::new(
-                                EventType::KEY,
-                                key.code(),
-                                event.value(),
-                            )]);
                         }
                     }
                 }

@@ -11,3 +11,9 @@ console none
 script
     exec /mnt/us/kindle-button-mapper/kindle-button-mapper /mnt/us/kindle-button-mapper/config.ini >>/var/log/kindle-button-mapper.log 2>&1
 end script
+
+# The daemon exits via _exit() on SIGTERM (skips Drop), so tear down the
+# keyboard-layout XKB override here instead. Harmless when no layout is set.
+post-stop script
+    umount /usr/share/X11/xkb/symbols/us 2>/dev/null || true
+end script
