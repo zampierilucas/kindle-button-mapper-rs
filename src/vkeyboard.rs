@@ -2,10 +2,11 @@ use evdev::uinput::{VirtualDevice, VirtualDeviceBuilder};
 use evdev::{AttributeSet, Key};
 use log::{info, warn};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const UINPUT_DEV: &str = "/dev/uinput";
+const UINPUT_SYSFS: &str = "/sys/class/misc/uinput";
 const TARGET_FILE: &str = "/var/run/kindle-button-mapper-key-target";
 
 pub fn try_init() -> Option<VirtualDevice> {
@@ -42,6 +43,7 @@ pub fn try_init() -> Option<VirtualDevice> {
 }
 
 fn ensure_uinput_node() -> Result<(), String> {
+    ensure_uinput_module();
     if Path::new(UINPUT_DEV).exists() {
         return Ok(());
     }
@@ -55,6 +57,54 @@ fn ensure_uinput_node() -> Result<(), String> {
     }
     let _ = Command::new("chmod").args(["600", UINPUT_DEV]).status();
     Ok(())
+}
+
+// Most Kindles ship CONFIG_INPUT_UINPUT built in. The Oasis 3 doesn't, so the
+// mknod'd node opens with ENODEV until the driver is loaded. Best effort: if the
+// driver isn't registered, insmod every bundled uinput-*.ko that matches the
+// running kernel until one takes.
+fn ensure_uinput_module() {
+    if Path::new(UINPUT_SYSFS).exists() {
+        return;
+    }
+    let release = kernel_release();
+    let entries = match fs::read_dir(module_dir()) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        if !name.starts_with("uinput-") || !name.ends_with(".ko") {
+            continue;
+        }
+        if !release.is_empty() && !name.contains(&release) {
+            continue;
+        }
+        info!("uinput driver missing, trying module {}", name);
+        let _ = Command::new("insmod").arg(&path).status();
+        if Path::new(UINPUT_SYSFS).exists() {
+            info!("uinput driver loaded from {}", name);
+            return;
+        }
+    }
+    warn!("uinput driver unavailable and no bundled module loaded — keyboard mappings will not inject events");
+}
+
+fn kernel_release() -> String {
+    fs::read_to_string("/proc/sys/kernel/osrelease")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
+fn module_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("modules")))
+        .unwrap_or_else(|| PathBuf::from("/mnt/us/kindle-button-mapper/modules"))
 }
 
 fn supported_keys() -> impl Iterator<Item = Key> {

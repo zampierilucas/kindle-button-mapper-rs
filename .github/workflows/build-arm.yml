@@ -44,10 +44,11 @@ jobs:
 
       - name: Assemble output tree
         run: |
-          mkdir -p output/scripts output/illusion/MapperManager output/assets
+          mkdir -p output/scripts output/illusion/MapperManager output/assets/modules
           cp target/armv7-unknown-linux-musleabihf/release/kindle-button-mapper output/
           cp install.sh uninstall.sh config.ini output/
           cp assets/kindle-button-mapper.upstart output/assets/
+          cp assets/modules/*.ko output/assets/modules/
           cp scripts/koreader.sh scripts/key.sh output/scripts/
           cp illusion/MapperManager.sh illusion/install-waf-app.sh output/illusion/
           cp illusion/MapperManager/config.xml illusion/MapperManager/index.html \
@@ -81,6 +82,7 @@ jobs:
             uninstall.sh \
             config.ini \
             assets/kindle-button-mapper.upstart \
+            assets/modules/uinput-4.1.15-lab126-5.18.2-zelda.ko \
             scripts/koreader.sh \
             scripts/key.sh \
             illusion/MapperManager.sh \

@@ -21,9 +21,12 @@ else
     exit 1
 fi
 
-mkdir -p "$INSTALL_DIR/scripts" "$INSTALL_DIR/illusion/MapperManager" "$INSTALL_DIR/assets"
+mkdir -p "$INSTALL_DIR/scripts" "$INSTALL_DIR/illusion/MapperManager" "$INSTALL_DIR/assets" "$INSTALL_DIR/modules"
 
 cp "$BIN" "$INSTALL_DIR/kindle-button-mapper"
+# Prebuilt uinput.ko for kernels lacking CONFIG_INPUT_UINPUT (Oasis 3). Loaded
+# on demand by the daemon when the driver isn't already present.
+cp "$SRC_DIR/assets/modules/"*.ko "$INSTALL_DIR/modules/" 2>/dev/null || true
 cp "$SRC_DIR/assets/kindle-button-mapper.upstart" "$INSTALL_DIR/assets/"
 cp "$SRC_DIR/uninstall.sh" "$INSTALL_DIR/"
 [ -f "$INSTALL_DIR/config.ini" ] || cp "$SRC_DIR/config.ini" "$INSTALL_DIR/"
