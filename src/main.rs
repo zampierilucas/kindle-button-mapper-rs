@@ -293,6 +293,8 @@ fn execute_script(script: &str) {
 
 const XKB_DISPLAY: &str = ":0";
 
+const XKB_MAX_DEVICE_ID: u32 = 32;
+
 fn apply_keyboard_layout(layout: &str) {
     let keymap = format!(
         "xkb_keymap {{\n\
@@ -303,19 +305,62 @@ fn apply_keyboard_layout(layout: &str) {
          \x20 xkb_geometry {{ include \"pc(pc105)\" }};\n\
          }};\n"
     );
-    let mut child = match Command::new("xkbcomp")
-        .args(["-I/usr/share/X11/xkb", "-", XKB_DISPLAY])
+
+    // Core keymap covers Xlib clients; per-device covers the XInput2 UI.
+    if !load_keymap(&keymap, None) {
+        return;
+    }
+
+    let ids = keyboard_device_ids();
+    if ids.is_empty() {
+        warn!("no keyboard devices found to apply layout per-device");
+    }
+    for id in ids {
+        if load_keymap(&keymap, Some(id)) {
+            info!("applied keyboard layout to device {}", id);
+        }
+    }
+}
+
+fn load_keymap(keymap: &str, device_id: Option<u32>) -> bool {
+    let mut cmd = Command::new("xkbcomp");
+    cmd.arg("-I/usr/share/X11/xkb");
+    let id_str;
+    if let Some(id) = device_id {
+        id_str = id.to_string();
+        cmd.args(["-i", &id_str]);
+    }
+    let mut child = match cmd
+        .args(["-", XKB_DISPLAY])
         .stdin(Stdio::piped())
         .spawn()
     {
         Ok(c) => c,
         Err(e) => {
             error!("xkbcomp failed to start: {}", e);
-            return;
+            return false;
         }
     };
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(keymap.as_bytes());
     }
-    let _ = child.wait();
+    matches!(child.wait(), Ok(status) if status.success())
+}
+
+fn keyboard_device_ids() -> Vec<u32> {
+    let mut ids = Vec::new();
+    for id in 1..=XKB_MAX_DEVICE_ID {
+        let out = Command::new("xkbcomp")
+            .args(["-i", &id.to_string(), "-xkb", XKB_DISPLAY, "-"])
+            .stderr(Stdio::null())
+            .output();
+        if let Ok(out) = out {
+            if out.status.success()
+                && String::from_utf8_lossy(&out.stdout).contains("xkb_symbols")
+            {
+                ids.push(id);
+            }
+        }
+    }
+    ids
 }
