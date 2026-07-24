@@ -13,6 +13,7 @@ use mapper::Mapper;
 use nix::poll::{poll, PollFd, PollFlags};
 use nix::sys::signal::{signal, SigHandler, Signal};
 use std::env;
+use std::fs;
 use std::io::Write;
 use std::os::fd::BorrowedFd;
 use std::os::unix::io::AsRawFd;
@@ -20,9 +21,38 @@ use std::process::{self, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const KEEP_AWAKE_INTERVAL: Duration = Duration::from_secs(60);
+// Fallback interval: 5 minutes (300 seconds)
+const DEFAULT_KEEP_AWAKE_INTERVAL: Duration = Duration::from_secs(300);
 const KEEP_AWAKE_POKE: &str = "lipc-set-prop -i com.lab126.powerd touchScreenSaverTimeout 1";
 const KEEP_AWAKE_RELEASE: &str = "lipc-set-prop com.lab126.powerd preventScreenSaver 0";
+
+/// Dynamically parse auto_suspend_timeout_seconds from KOReader configuration
+fn get_koreader_keep_awake_interval() -> Duration {
+    let settings_path = "/mnt/us/koreader/settings.reader.lua";
+    if let Ok(content) = fs::read_to_string(settings_path) {
+        // Match ["auto_suspend_timeout_seconds"] = 900,
+        for line in content.lines() {
+            if line.contains("auto_suspend_timeout_seconds") {
+                if let Some(num_str) = line.split('=').nth(1) {
+                    let cleaned = num_str.trim().trim_matches(|c| c == ',' || c == '"' || c == '\'');
+                    if let Ok(secs) = cleaned.parse::<i64>() {
+                        // If KOReader sets -1 (disabled), fallback to default 300s
+                        if secs > 60 {
+                            let safe_interval = (secs / 2) as u64; // Set refresh interval to half of the timeout
+                            info!(
+                                "KOReader auto_suspend_timeout_seconds detected: {}s. Setting keep-awake interval to {}s.",
+                                secs, safe_interval
+                            );
+                            return Duration::from_secs(safe_interval);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    info!("Could not read KOReader auto_suspend_timeout_seconds. Using default interval: 300s.");
+    DEFAULT_KEEP_AWAKE_INTERVAL
+}
 
 fn main() {
     env_logger::Builder::from_env(
@@ -86,9 +116,6 @@ fn main() {
         signal(Signal::SIGTERM, SigHandler::Handler(handle_signal)).ok();
     }
 
-    // Virtual keyboard via uinput — kept alive for the daemon's lifetime.
-    // The path is written to /var/run/kindle-button-mapper-key-target so
-    // scripts/key.sh can inject events into it.
     let _vkeyboard = vkeyboard::try_init();
 
     let mut handles = Vec::new();
@@ -149,7 +176,7 @@ fn device_worker(cfg: config::DeviceConfig, settings: WorkerSettings) {
                 info!("[{}] device connected", cfg.id);
                 if let Some(ref script) = settings.on_connect {
                     info!("[{}] running on_connect script", cfg.id);
-                    execute_script(script);
+                    execute_script_detach(script);
                 }
                 if let Some(ref layout) = cfg.keyboard_layout {
                     info!("[{}] applying keyboard layout '{}'", cfg.id, layout);
@@ -159,7 +186,7 @@ fn device_worker(cfg: config::DeviceConfig, settings: WorkerSettings) {
                     error!("[{}] event loop error: {}", cfg.id, e);
                     if let Some(ref script) = settings.on_disconnect {
                         info!("[{}] device disconnected, running on_disconnect script", cfg.id);
-                        execute_script(script);
+                        execute_script_detach(script);
                     }
                 }
             }
@@ -173,19 +200,24 @@ fn device_worker(cfg: config::DeviceConfig, settings: WorkerSettings) {
 }
 
 fn run_event_loop(device: &mut evdev::Device, mapper: &mut Mapper, grab: bool, keep_awake: bool) -> Result<(), String> {
-    // Non-blocking + poll so we can notice a capture pause while idle.
     set_nonblocking(device.as_raw_fd());
     let mut grabbed = grab;
 
+    // Dynamically retrieve Keep-Awake interval
+    let keep_awake_interval = if keep_awake {
+        get_koreader_keep_awake_interval()
+    } else {
+        DEFAULT_KEEP_AWAKE_INTERVAL
+    };
+
     let mut last_poke: Option<Instant> = if keep_awake {
-        execute_script(KEEP_AWAKE_RELEASE);
+        execute_script_detach(KEEP_AWAKE_RELEASE);
         Some(Instant::now())
     } else {
         None
     };
 
     loop {
-        // Release the grab while capture is paused, restore it after.
         let paused = pause::active();
         if paused && grabbed {
             let _ = device.ungrab();
@@ -217,7 +249,7 @@ fn run_event_loop(device: &mut evdev::Device, mapper: &mut Mapper, grab: bool, k
         };
 
         if paused {
-            for _ in events {} // drain; these presses belong to capture
+            for _ in events {}
             continue;
         }
 
@@ -227,21 +259,19 @@ fn run_event_loop(device: &mut evdev::Device, mapper: &mut Mapper, grab: bool, k
                 InputEventKind::Key(key) => {
                     activity = true;
                     match event.value() {
-                        1 => mapper.handle_press(key),  // Press
-                        2 => mapper.handle_held(key),   // Held/repeat
-                        0 => mapper.handle_release(key), // Release
+                        1 => mapper.handle_press(key),
+                        2 => mapper.handle_held(key),
+                        0 => mapper.handle_release(key),
                         _ => {}
                     }
                 }
                 InputEventKind::AbsAxis(axis) => {
                     let code = axis.0;
                     match code {
-                        // D-pad: Hat0X (16) and Hat0Y (17)
                         16 | 17 => {
                             activity = true;
                             mapper.handle_dpad(code, event.value());
                         }
-                        // Triggers: Gas (9) = RT, Brake (10) = LT
                         9 | 10 => {
                             activity = true;
                             mapper.handle_trigger(code, event.value());
@@ -253,11 +283,12 @@ fn run_event_loop(device: &mut evdev::Device, mapper: &mut Mapper, grab: bool, k
             }
         }
 
+        // Re-arm screensaver idle timer only after the interval has elapsed
         if keep_awake && activity {
             let now = Instant::now();
-            if last_poke.is_none_or(|t| now.duration_since(t) >= KEEP_AWAKE_INTERVAL) {
-                info!("keep-awake: re-armed screensaver idle timer");
-                execute_script(KEEP_AWAKE_POKE);
+            if last_poke.is_none_or(|t| now.duration_since(t) >= keep_awake_interval) {
+                info!("keep-awake: re-armed screensaver idle timer (interval: {}s)", keep_awake_interval.as_secs());
+                execute_script_detach(KEEP_AWAKE_POKE);
                 last_poke = Some(now);
             }
         }
@@ -275,20 +306,7 @@ fn set_nonblocking(fd: std::os::unix::io::RawFd) {
 }
 
 extern "C" fn handle_signal(_: i32) {
-    // _exit is async-signal-safe; process::exit is not.
     unsafe { nix::libc::_exit(0) }
-}
-
-fn execute_script(script: &str) {
-    match Command::new("/bin/sh").args(["-c", script]).spawn() {
-        Ok(mut child) => {
-            // Wait for completion (blocking) for disconnect script
-            let _ = child.wait();
-        }
-        Err(e) => {
-            error!("Failed to execute '{}': {}", script, e);
-        }
-    }
 }
 
 const XKB_DISPLAY: &str = ":0";
@@ -318,4 +336,18 @@ fn apply_keyboard_layout(layout: &str) {
         let _ = stdin.write_all(keymap.as_bytes());
     }
     let _ = child.wait();
+}
+
+fn execute_script_detach(script: &str) {
+    let script = script.to_string();
+    thread::spawn(move || {
+        match Command::new("/bin/sh").args(["-c", &script]).spawn() {
+            Ok(mut child) => {
+                let _ = child.wait();
+            }
+            Err(e) => {
+                error!("Failed to execute detached script '{}': {}", script, e);
+            }
+        }
+    });
 }
