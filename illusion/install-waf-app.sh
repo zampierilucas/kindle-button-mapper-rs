@@ -1,6 +1,7 @@
 #!/bin/sh
 # install-waf-app.sh - Install MapperManager WAF app (Illusion)
 # Run on the Kindle to register and set up the Button Mapper WAF app.
+# Also handles UPstart configuration for kindle-button-mapper.
 
 APP_ID="com.lzampier.mappermanager"
 APP_DIR="/mnt/us/kindle-button-mapper/illusion/MapperManager"
@@ -9,6 +10,8 @@ BINARY="/mnt/us/kindle-button-mapper/kindle-button-mapper"
 SCRIPTLET="$ILLUSION_DIR/MapperManager.sh"
 SCRIPTLET_DEST="/mnt/us/documents/MapperManager.sh"
 APPREG_DB="/var/local/appreg.db"
+UPSTART_SRC="/mnt/us/kindle-button-mapper/assets/kindle-button-mapper.upstart"
+UPSTART_DEST="/etc/upstart/kindle-button-mapper.conf"
 
 echo ""
 echo "=== MapperManager Installer ==="
@@ -58,6 +61,24 @@ echo "4. Installing scriptlet"
 cp "$SCRIPTLET" "$SCRIPTLET_DEST"
 chmod +x "$SCRIPTLET_DEST"
 echo "   Installed at $SCRIPTLET_DEST"
+
+echo "5. Installing UPstart configuration"
+/usr/sbin/mntroot rw 2>/dev/null
+
+if [ -f "$UPSTART_SRC" ]; then
+    cp "$UPSTART_SRC" "$UPSTART_DEST"
+    echo "   Copied UPstart config to $UPSTART_DEST"
+    /sbin/initctl reload-configuration 2>/dev/null || true
+    if /sbin/initctl status kindle-button-mapper 2>/dev/null | grep -q "start/running"; then
+        /sbin/initctl restart kindle-button-mapper 2>/dev/null || true
+    else
+        /sbin/initctl start kindle-button-mapper 2>/dev/null || true
+    fi
+else
+    echo "   WARNING: UPstart source file not found at $UPSTART_SRC"
+fi
+
+/usr/sbin/mntroot ro 2>/dev/null || true
 
 echo ""
 echo "=== Installation Complete ==="
