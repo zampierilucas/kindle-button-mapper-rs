@@ -1,25 +1,17 @@
 #!/bin/sh
 # KOReader HTTP API wrapper script
 # Usage: koreader.sh <command> [args...]
-#
-# Commands:
-#   next_page        - Turn to next page
-#   prev_page        - Turn to previous page
-#   brightness <n>   - Adjust brightness (positive=up, negative=down)
-#   brightness_toggle - Toggle frontlight on/off
-#   night_mode       - Toggle night/dark mode
-#   font_up [n]      - Increase font size (default: 1)
-#   font_down [n]    - Decrease font size (default: 1)
-#   event <name> [args] - Send arbitrary event
 
 KOREADER_URL="http://localhost:8080/koreader/event"
 LOG_PATH="/var/log/kindle-button-mapper.log"
 
-# Send event to KOReader
+# Send event to KOReader (Asynchronously in background)
 send_event() {
-    if ! curl -s --connect-timeout 1 "${KOREADER_URL}/$1" >/dev/null 2>&1; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') WARN  koreader.sh: KOReader not reachable at ${KOREADER_URL} (event '$1' dropped); KOReader may be closed, or HTTP Inspector auto-start is off." >> "$LOG_PATH" 2>/dev/null
-    fi
+    (
+        if ! curl -s --connect-timeout 1 --max-time 1 "${KOREADER_URL}/$1" >/dev/null 2>&1; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') WARN  koreader.sh: KOReader not reachable at ${KOREADER_URL} (event '$1' dropped); KOReader may be closed, or HTTP Inspector auto-start is off." >> "$LOG_PATH" 2>/dev/null
+        fi
+    ) &
 }
 
 case "$1" in
