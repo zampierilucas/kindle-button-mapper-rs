@@ -1,3 +1,4 @@
+use crate::config::clean_device_name;
 use evdev::Device;
 use log::{debug, info, warn};
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
@@ -22,7 +23,7 @@ impl InputHandler {
         grab: bool,
     ) -> Self {
         Self {
-            device_name,
+            device_name: device_name.map(|n| clean_device_name(&n)),
             device_uniq,
             grab,
         }
@@ -57,7 +58,7 @@ impl InputHandler {
         }
         if let Some(ref name) = self.device_name {
             if !name.is_empty() {
-                return dev.name().unwrap_or("") == name.as_str();
+                return clean_device_name(dev.name().unwrap_or("")) == *name;
             }
         }
         true

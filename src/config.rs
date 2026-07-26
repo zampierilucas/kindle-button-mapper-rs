@@ -163,7 +163,11 @@ impl Config {
 
             match parts.get(2).copied() {
                 None => {
-                    if let Some(v) = get(entries, "name") { dev.name = Some(v.to_string()); }
+                    // Clean here too: configs written before this existed may
+                    // still hold a U+FFFD-mangled name.
+                    dev.name = get(entries, "name")
+                        .map(clean_device_name)
+                        .filter(|v| !v.is_empty());
                     if let Some(v) = get(entries, "uniq") { dev.uniq = Some(v.to_string()); }
                     if let Some(v) = get(entries, "grab") { dev.grab = parse_bool(v); }
                     dev.keyboard_layout = get(entries, "keyboard_layout")
@@ -193,6 +197,20 @@ impl Config {
 
         Ok(config)
     }
+}
+
+/// Kernel device names are raw bytes; evdev decodes them lossily, so junk from
+/// the manufacturer arrives as NULs, control chars or U+FFFD. Strip it so every
+/// path (scan, config, UI) produces the same string for the same device.
+pub fn clean_device_name(s: &str) -> String {
+    s.split('\0')
+        .next()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| *c != '\u{fffd}' && !c.is_control())
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 fn get<'a>(section: &'a HashMap<String, Option<String>>, key: &str) -> Option<&'a str> {

@@ -1,3 +1,4 @@
+use crate::config::clean_device_name;
 use evdev::{Device, InputEventKind};
 use log::{error, info, warn};
 use std::fs;
@@ -239,7 +240,7 @@ fn devices_json() -> String {
             let (dev_name, dev_uniq) = Device::open(&path)
                 .ok()
                 .map(|d| {
-                    let n = d.name().unwrap_or("").to_string();
+                    let n = clean_device_name(d.name().unwrap_or(""));
                     let u = d.unique_name().unwrap_or("").to_string();
                     (n, u)
                 })
