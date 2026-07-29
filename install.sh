@@ -23,14 +23,20 @@ fi
 
 mkdir -p "$INSTALL_DIR/scripts" "$INSTALL_DIR/illusion/MapperManager" "$INSTALL_DIR/assets"
 
-cp "$BIN" "$INSTALL_DIR/kindle-button-mapper"
-cp "$SRC_DIR/assets/kindle-button-mapper.upstart" "$INSTALL_DIR/assets/"
-cp "$SRC_DIR/uninstall.sh" "$INSTALL_DIR/"
-[ -f "$INSTALL_DIR/config.ini" ] || cp "$SRC_DIR/config.ini" "$INSTALL_DIR/"
-cp "$SRC_DIR/scripts/"*.sh "$INSTALL_DIR/scripts/"
+# The tree may already have been copied straight into INSTALL_DIR; only copy
+# what isn't already in place (busybox cp aborts on same-file copies).
+if [ "$BIN" != "$INSTALL_DIR/kindle-button-mapper" ]; then
+    cp "$BIN" "$INSTALL_DIR/kindle-button-mapper"
+fi
+if [ "$SRC_DIR" != "$INSTALL_DIR" ]; then
+    cp "$SRC_DIR/assets/kindle-button-mapper.upstart" "$INSTALL_DIR/assets/"
+    cp "$SRC_DIR/uninstall.sh" "$INSTALL_DIR/"
+    [ -f "$INSTALL_DIR/config.ini" ] || cp "$SRC_DIR/config.ini" "$INSTALL_DIR/"
+    cp "$SRC_DIR/scripts/"*.sh "$INSTALL_DIR/scripts/"
+    cp "$SRC_DIR/illusion/MapperManager.sh" "$SRC_DIR/illusion/install-waf-app.sh" "$INSTALL_DIR/illusion/"
+    cp "$SRC_DIR/illusion/MapperManager/"* "$INSTALL_DIR/illusion/MapperManager/"
+fi
 rm -f "$INSTALL_DIR/scripts/start-inhib.sh" "$INSTALL_DIR/scripts/stop-inhib.sh"
-cp "$SRC_DIR/illusion/MapperManager.sh" "$SRC_DIR/illusion/install-waf-app.sh" "$INSTALL_DIR/illusion/"
-cp "$SRC_DIR/illusion/MapperManager/"* "$INSTALL_DIR/illusion/MapperManager/"
 
 chmod +x "$INSTALL_DIR/kindle-button-mapper" \
          "$INSTALL_DIR/uninstall.sh" \
