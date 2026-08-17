@@ -1,9 +1,9 @@
-use evdev::Device;
+use evdev::{AttributeSetRef, Device, Key};
 use log::{debug, info, warn};
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use std::ffi::OsStr;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
@@ -17,6 +17,13 @@ const SETTLE_INTERVAL: Duration = Duration::from_millis(100);
 pub fn uniq_matches(node: &str, want: &str) -> bool {
     let bare = |s: &str| s.split('/').next().unwrap_or("").to_ascii_uppercase();
     !want.is_empty() && bare(node) == bare(want)
+}
+
+fn mappable_keys(keys: Option<&AttributeSetRef<Key>>) -> usize {
+    let mouse_buttons = Key::BTN_LEFT.code()..=Key::BTN_TASK.code();
+    keys.map_or(0, |keys| {
+        keys.iter().filter(|k| !mouse_buttons.contains(&k.code())).count()
+    })
 }
 
 pub struct InputHandler {
@@ -77,6 +84,8 @@ impl InputHandler {
         let entries = fs::read_dir(INPUT_DIR)
             .map_err(|e| format!("Cannot open {}: {}", INPUT_DIR, e))?;
 
+        let mut best: Option<(usize, PathBuf, Device)> = None;
+
         for entry in entries.flatten() {
             let path = entry.path();
             let filename = path.file_name().and_then(OsStr::to_str).unwrap_or("");
@@ -89,9 +98,13 @@ impl InputHandler {
                         path.display(),
                         dev.name().unwrap_or(""),
                         dev.unique_name().unwrap_or(""));
-                    if self.matches_device(&dev) {
-                        info!("Found device at {}", path.display());
-                        return Ok(Some(dev));
+                    if !self.matches_device(&dev) {
+                        continue;
+                    }
+                    let keys = mappable_keys(dev.supported_keys());
+                    debug!("{} matches, {} mappable keys", path.display(), keys);
+                    if best.as_ref().is_none_or(|(most, _, _)| keys > *most) {
+                        best = Some((keys, path, dev));
                     }
                 }
                 Err(e) => {
@@ -99,7 +112,10 @@ impl InputHandler {
                 }
             }
         }
-        Ok(None)
+        Ok(best.map(|(_, path, dev)| {
+            info!("Found device at {}", path.display());
+            dev
+        }))
     }
 
     fn wait_for_matching_device(&self) -> Result<Device, String> {
@@ -170,7 +186,20 @@ impl InputHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::uniq_matches;
+    use super::{mappable_keys, uniq_matches};
+    use evdev::{AttributeSet, Key};
+
+    #[test]
+    fn a_mouse_node_loses_to_the_keyboard_node() {
+        let mouse = AttributeSet::from_iter([Key::BTN_LEFT, Key::BTN_RIGHT, Key::BTN_MIDDLE]);
+        let keyboard = AttributeSet::from_iter([Key::KEY_A, Key::KEY_PAGEUP, Key::KEY_PAGEDOWN]);
+        let gamepad = AttributeSet::from_iter([Key::BTN_SOUTH, Key::BTN_EAST]);
+
+        assert_eq!(mappable_keys(Some(&mouse)), 0);
+        assert_eq!(mappable_keys(Some(&keyboard)), 3);
+        assert_eq!(mappable_keys(Some(&gamepad)), 2);
+        assert_eq!(mappable_keys(None), 0);
+    }
 
     #[test]
     fn uniq_ignores_suffix_and_case() {
