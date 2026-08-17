@@ -145,6 +145,13 @@ writes the events itself, no daemon involved. Only reach for these if the plain
 page turn does nothing, since a tap follows whatever tap zones you have set in
 the reader.
 
+The panel never turns with the screen, so a tap for the right edge of a
+landscape page has to be rotated back into panel coordinates. `tap.sh` asks the
+framework which way up it is and does that itself. KOReader rotates in software
+and tells nobody, so there it reads as upright and the tap lands where it did in
+portrait — use its HTTP Inspector, which turns the page whatever the rotation.
+Set `TAP_ROTATION` to `0`, `90`, `180` or `270` to force the angle.
+
 Everything else goes over `lipc`.
 
 `keep_awake = true` (default) resets the screensaver timer on input so the device stays awake while a controller is connected, without blocking the power button.

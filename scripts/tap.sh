@@ -6,6 +6,9 @@
 # touchscreen node, so it needs nothing but a shell. Codes the panel does not
 # support are dropped by the kernel, which is why the sequence can carry both
 # BTN_TOUCH and the pressure/contact axes and still suit either panel.
+#
+# Percentages are screen space, rotated into panel space before writing.
+# TAP_ROTATION forces the angle, TAP_DRY_RUN prints the pixel and taps nothing.
 
 X_PCT="${1:-85}"
 Y_PCT="${2:-50}"
@@ -41,6 +44,23 @@ screen_size() {
     sed -n 's/^[^:]*:\([0-9]*\)x\([0-9]*\).*/\1 \2/p' "$FB_MODES" 2>/dev/null | head -n 1
 }
 
+# KOReader rotates in software and tells nobody, so there this reads upright.
+# Wrapped because a suspended framework can hang the call.
+rotation() {
+    [ -n "$TAP_ROTATION" ] && { echo "$TAP_ROTATION"; return; }
+    if command -v timeout >/dev/null 2>&1; then
+        o=$(timeout 1 lipc-get-prop com.lab126.system orientation 2>/dev/null)
+    else
+        o=$(lipc-get-prop com.lab126.system orientation 2>/dev/null)
+    fi
+    case "$o" in
+        R) echo 90 ;;
+        D) echo 180 ;;
+        L) echo 270 ;;
+        *) echo 0 ;;
+    esac
+}
+
 DEV=$(touch_node)
 [ -z "$DEV" ] && { echo "tap.sh: no touchscreen found" >&2; exit 1; }
 
@@ -51,8 +71,22 @@ case "$W$H" in
     ""|*[!0-9]*) echo "tap.sh: cannot read screen size from $FB_MODES" >&2; exit 1 ;;
 esac
 
+ROT=$(rotation)
+case "$ROT" in
+    90)  T=$X_PCT; X_PCT=$(( 100 - Y_PCT )); Y_PCT=$T ;;
+    180) X_PCT=$(( 100 - X_PCT )); Y_PCT=$(( 100 - Y_PCT )) ;;
+    270) T=$X_PCT; X_PCT=$Y_PCT; Y_PCT=$(( 100 - T )) ;;
+esac
+
+# Some firmware swaps the reported mode with the rotation, the panel never does.
+case "$ROT" in
+    90|270) [ "$W" -gt "$H" ] && { T=$W; W=$H; H=$T; } ;;
+esac
+
 X=$(( W * X_PCT / 100 ))
 Y=$(( H * Y_PCT / 100 ))
+
+[ -n "$TAP_DRY_RUN" ] && { echo "$X $Y"; exit 0; }
 
 # Escape text rather than raw bytes, so the whole sequence goes out in one
 # write. evdev rejects a write that is not a whole number of events, and a
