@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
 use nix::sys::signal::{kill, Signal};
+use std::cmp::Ordering;
 use nix::unistd::Pid;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -258,10 +259,12 @@ type Node = (String, String, String, usize);
 // them — otherwise capture reads a node the daemon never opens.
 fn sort_nodes(nodes: &mut [Node]) {
     nodes.sort_by(|a, b| {
-        crate::input::bare_addr(&a.2)
-            .cmp(&crate::input::bare_addr(&b.2))
-            .then(b.3.cmp(&a.3))
-            .then(a.0.cmp(&b.0))
+        let (left, right) = (crate::input::bare_addr(&a.2), crate::input::bare_addr(&b.2));
+        left.cmp(&right)
+            // Only nodes of one address are ranked against each other. The
+            // built-in nodes carry no address and stay in path order.
+            .then_with(|| if left.is_empty() { Ordering::Equal } else { b.3.cmp(&a.3) })
+            .then_with(|| a.0.cmp(&b.0))
     });
 }
 
@@ -586,12 +589,13 @@ mod tests {
     }
 
     #[test]
-    fn unrelated_nodes_keep_path_order() {
+    fn nodes_without_an_address_keep_path_order() {
         let mut nodes = vec![
-            node("/dev/input/event2", "b", "", 0),
-            node("/dev/input/event1", "a", "", 0),
+            node("/dev/input/event1", "goodix-ts", "", 4),
+            node("/dev/input/event0", "bd71828-pwrkey", "", 1),
         ];
         sort_nodes(&mut nodes);
-        assert_eq!(nodes[0].0, "/dev/input/event1");
+        let paths: Vec<&str> = nodes.iter().map(|n| n.0.as_str()).collect();
+        assert_eq!(paths, ["/dev/input/event0", "/dev/input/event1"]);
     }
 }
