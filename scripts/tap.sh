@@ -49,14 +49,14 @@ screen_size() {
 rotation() {
     [ -n "$TAP_ROTATION" ] && { echo "$TAP_ROTATION"; return; }
     if command -v timeout >/dev/null 2>&1; then
-        o=$(timeout 1 lipc-get-prop com.lab126.system orientation 2>/dev/null)
+        o=$(timeout 1 lipc-get-prop com.lab126.winmgr orientation 2>/dev/null)
     else
-        o=$(lipc-get-prop com.lab126.system orientation 2>/dev/null)
+        o=$(lipc-get-prop com.lab126.winmgr orientation 2>/dev/null)
     fi
     case "$o" in
-        R) echo 90 ;;
+        R) echo 270 ;;
         D) echo 180 ;;
-        L) echo 270 ;;
+        L) echo 90 ;;
         *) echo 0 ;;
     esac
 }
@@ -79,9 +79,7 @@ case "$ROT" in
 esac
 
 # Some firmware swaps the reported mode with the rotation, the panel never does.
-case "$ROT" in
-    90|270) [ "$W" -gt "$H" ] && { T=$W; W=$H; H=$T; } ;;
-esac
+[ "$W" -gt "$H" ] && { T=$W; W=$H; H=$T; }
 
 X=$(( W * X_PCT / 100 ))
 Y=$(( H * Y_PCT / 100 ))
