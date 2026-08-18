@@ -1,6 +1,7 @@
 use evdev::{Device, InputEventKind};
 use log::{error, info, warn};
 use std::fs;
+use std::cmp::Ordering;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
@@ -250,6 +251,17 @@ fn url_decode(s: &str) -> String {
 
 // ---- handlers ----
 
+type Node = (String, String, String, usize);
+
+fn sort_nodes(nodes: &mut [Node]) {
+    nodes.sort_by(|a, b| {
+        let (left, right) = (crate::input::bare_addr(&a.2), crate::input::bare_addr(&b.2));
+        left.cmp(&right)
+            .then_with(|| if left.is_empty() { Ordering::Equal } else { b.3.cmp(&a.3) })
+            .then_with(|| a.0.cmp(&b.0))
+    });
+}
+
 fn devices_json() -> String {
     let mut entries = Vec::new();
     if let Ok(dir) = fs::read_dir(INPUT_DIR) {
@@ -263,24 +275,24 @@ fn devices_json() -> String {
             if !name.starts_with("event") {
                 continue;
             }
-            let (dev_name, dev_uniq) = Device::open(&path)
+            let (dev_name, dev_uniq, keys) = Device::open(&path)
                 .ok()
                 .map(|d| {
                     let n = d.name().unwrap_or("").to_string();
                     let u = d.unique_name().unwrap_or("").to_string();
-                    (n, u)
+                    (n, u, crate::input::mappable_keys(d.supported_keys()))
                 })
                 .unwrap_or_default();
             if dev_name == "kindle-button-mapper" {
                 continue;
             }
-            entries.push((path.display().to_string(), dev_name, dev_uniq));
+            entries.push((path.display().to_string(), dev_name, dev_uniq, keys));
         }
     }
-    entries.sort();
+    sort_nodes(&mut entries);
     let items: Vec<String> = entries
         .iter()
-        .map(|(p, n, u)| format!("{{\"path\":\"{}\",\"name\":\"{}\",\"uniq\":\"{}\"}}", esc(p), esc(n), esc(u)))
+        .map(|(p, n, u, _)| format!("{{\"path\":\"{}\",\"name\":\"{}\",\"uniq\":\"{}\"}}", esc(p), esc(n), esc(u)))
         .collect();
     format!("{{\"ok\":true,\"devices\":[{}]}}", items.join(","))
 }
@@ -545,4 +557,34 @@ fn esc(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sort_nodes;
+
+    fn node(path: &str, name: &str, uniq: &str, keys: usize) -> super::Node {
+        (path.into(), name.into(), uniq.into(), keys)
+    }
+
+    #[test]
+    fn nodes_of_one_address_lead_with_the_keys_the_rest_keep_path_order() {
+        let mut nodes = vec![
+            node("/dev/input/event3", "Smart 1-P Consumer Control", "E0:F6:B5:BC:1C:7F/P", 20),
+            node("/dev/input/event1", "goodix-ts", "", 4),
+            node("/dev/input/event4", "Smart 1-P Keyboard", "e0:f6:b5:bc:1c:7f", 120),
+            node("/dev/input/event0", "bd71828-pwrkey", "", 1),
+        ];
+        sort_nodes(&mut nodes);
+        let paths: Vec<&str> = nodes.iter().map(|n| n.0.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "/dev/input/event0",
+                "/dev/input/event1",
+                "/dev/input/event4",
+                "/dev/input/event3"
+            ]
+        );
+    }
 }
