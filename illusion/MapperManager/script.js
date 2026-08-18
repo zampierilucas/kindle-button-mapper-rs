@@ -525,6 +525,8 @@ var MapperManager = (function() {
             if (err) { cb(null, "Devices: " + err); return; }
             var list = data.devices || [];
             var match = null;
+            // The helper lists nodes sharing an address best-first, so the
+            // first match is the one the daemon opens.
             for (var i = 0; i < list.length; i++) {
                 if (uniq && bareUniq(list[i].uniq || "") === uniq) {
                     match = list[i];

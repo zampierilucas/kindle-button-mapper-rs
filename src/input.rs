@@ -13,13 +13,19 @@ const SETTLE_INTERVAL: Duration = Duration::from_millis(100);
 
 /// A Bluetooth node's uniq carries the address type as a suffix
 /// ("E0:F6:B5:BC:1C:7F/P"), but configs hold the bare MAC in whatever case
-/// the user typed. Compare only the address part, case-insensitively.
-pub fn uniq_matches(node: &str, want: &str) -> bool {
-    let bare = |s: &str| s.split('/').next().unwrap_or("").to_ascii_uppercase();
-    !want.is_empty() && bare(node) == bare(want)
+/// the user typed. Strip it, so only the address part is compared.
+pub fn bare_addr(s: &str) -> String {
+    s.split('/').next().unwrap_or("").to_ascii_uppercase()
 }
 
-fn mappable_keys(keys: Option<&AttributeSetRef<Key>>) -> usize {
+pub fn uniq_matches(node: &str, want: &str) -> bool {
+    !want.is_empty() && bare_addr(node) == bare_addr(want)
+}
+
+/// How many keys the mapper could bind on this node, ignoring the buttons a
+/// pointer reports on its own. Ranks the nodes of a device that registers
+/// several under one address.
+pub fn mappable_keys(keys: Option<&AttributeSetRef<Key>>) -> usize {
     let mouse_buttons = Key::BTN_LEFT.code()..=Key::BTN_TASK.code();
     keys.map_or(0, |keys| {
         keys.iter().filter(|k| !mouse_buttons.contains(&k.code())).count()
