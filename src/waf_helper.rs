@@ -568,28 +568,23 @@ mod tests {
     }
 
     #[test]
-    fn the_node_with_the_keys_leads_its_address() {
+    fn nodes_of_one_address_lead_with_the_keys_the_rest_keep_path_order() {
         let mut nodes = vec![
             node("/dev/input/event3", "Smart 1-P Consumer Control", "E0:F6:B5:BC:1C:7F/P", 20),
+            node("/dev/input/event1", "goodix-ts", "", 4),
             node("/dev/input/event4", "Smart 1-P Keyboard", "e0:f6:b5:bc:1c:7f", 120),
-            node("/dev/input/event0", "cyttsp5_mt", "", 2),
+            node("/dev/input/event0", "bd71828-pwrkey", "", 1),
         ];
         sort_nodes(&mut nodes);
         let paths: Vec<&str> = nodes.iter().map(|n| n.0.as_str()).collect();
         assert_eq!(
             paths,
-            ["/dev/input/event0", "/dev/input/event4", "/dev/input/event3"]
+            [
+                "/dev/input/event0",
+                "/dev/input/event1",
+                "/dev/input/event4",
+                "/dev/input/event3"
+            ]
         );
-    }
-
-    #[test]
-    fn nodes_without_an_address_keep_path_order() {
-        let mut nodes = vec![
-            node("/dev/input/event1", "goodix-ts", "", 4),
-            node("/dev/input/event0", "bd71828-pwrkey", "", 1),
-        ];
-        sort_nodes(&mut nodes);
-        let paths: Vec<&str> = nodes.iter().map(|n| n.0.as_str()).collect();
-        assert_eq!(paths, ["/dev/input/event0", "/dev/input/event1"]);
     }
 }
