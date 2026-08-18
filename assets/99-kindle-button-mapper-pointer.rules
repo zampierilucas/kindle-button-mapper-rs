@@ -1,0 +1,3 @@
+# Xorg's pointer catchall only matches ID_INPUT_MOUSE, and stock Kindle udev
+# tags nothing, so without this X never adds the mapper's virtual pointer.
+ACTION=="add", SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="kindle-button-mapper-pointer", ENV{ID_INPUT}="1", ENV{ID_INPUT_MOUSE}="1"

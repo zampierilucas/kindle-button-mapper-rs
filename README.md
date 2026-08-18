@@ -73,6 +73,7 @@ on_disconnect = /path/to/script.sh
 name = Device Name
 uniq = AA:BB:CC:DD:EE:FF   # Bluetooth MAC; matched first when set
 grab = true
+# type = mouse             # map a mouse's buttons, keep it pointing
 # keyboard_layout = fr     # XKB layout override (comma list for an Alt+Shift toggle, e.g. us,ru)
 
 [device.gamepad.buttons]
@@ -99,6 +100,14 @@ unstable across reconnects): the mapper uses the Bluetooth MAC (`uniq`) when set
 otherwise the device `name`. Set at least one.
 
 Set `keyboard_layout` to an XKB layout code (e.g. `fr`, `de`, `ro`, `fr(oss)`) to type correctly on a non-US Bluetooth keyboard. The reader re-pins the `us` core keymap on every focus and `/usr/share/X11/xkb` is read-only, so the mapper bind-mounts a generated `us` symbols file over the system one; every re-pin then resolves to your layout, reverted when the daemon stops. Give a comma list for an Alt+Shift toggle (`us,ru`); it's a system-wide override taken from the first device that sets one. Leave it unset to keep the system default.
+
+Set `type = mouse` on a mouse. Sharing one means every mapped click also lands
+as a tap on whatever is under the cursor, and taking it exclusively to stop that
+freezes the pointer, since nothing else can read the device any more. With
+`type = mouse` the mapper holds the mouse, opens the node carrying the buttons
+rather than any second node the device registers, and re-emits the movement, the
+wheel and the buttons you left unmapped through a virtual pointer, so the cursor
+still moves and the rest of the buttons still click.
 
 A button fires as soon as it goes down. Give it a `longpress` mapping and it
 fires on release instead, since a short press is only a short press once you

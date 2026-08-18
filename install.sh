@@ -60,6 +60,10 @@ rm -f "$INSTALL_DIR/boot_attempts"
 
 cp "$INSTALL_DIR/assets/kindle-button-mapper.upstart" /etc/upstart/kindle-button-mapper.conf
 
+# udevd reads its rules once, so a fresh install has to say so.
+cp "$INSTALL_DIR/assets/99-kindle-button-mapper-pointer.rules" /etc/udev/rules.d/
+killall -HUP udevd 2>/dev/null || true
+
 cp "$INSTALL_DIR/illusion/MapperManager.sh" /mnt/us/documents/MapperManager.sh
 chmod +x /mnt/us/documents/MapperManager.sh
 

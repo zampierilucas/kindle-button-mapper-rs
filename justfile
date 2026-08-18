@@ -59,6 +59,8 @@ deploy: build-kindle
     scp scripts/*.sh kindle:/mnt/us/kindle-button-mapper/scripts/
     ssh kindle "chmod +x /mnt/us/kindle-button-mapper/scripts/*.sh"
     scp assets/kindle-button-mapper.upstart kindle:/etc/upstart/kindle-button-mapper.conf
+    scp assets/99-kindle-button-mapper-pointer.rules kindle:/etc/udev/rules.d/
+    ssh kindle "killall -HUP udevd || true"
     @echo "Deployment complete!"
     @echo ""
     @echo "Start daemon with: just start"

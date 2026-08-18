@@ -33,6 +33,8 @@ pub struct DeviceConfig {
     /// Re-emit keys with no mapping through the virtual keyboard. Only means
     /// anything alongside a grab, and it is what makes a keyboard survive one.
     pub passthrough: bool,
+    /// Hold the mouse and relay what is not mapped, instead of sharing it.
+    pub mouse: bool,
     pub keyboard_layout: Option<String>,
     pub mappings: HashMap<Key, String>,
     pub long_press_mappings: HashMap<Key, String>,
@@ -100,6 +102,7 @@ impl DeviceConfig {
             grab: true,
             grab_explicit: false,
             passthrough: false,
+            mouse: false,
             keyboard_layout: None,
             mappings: HashMap::new(),
             long_press_mappings: HashMap::new(),
@@ -253,6 +256,9 @@ impl Config {
                         dev.grab_explicit = true;
                     }
                     if let Some(v) = get(entries, "passthrough") { dev.passthrough = parse_bool(v); }
+                    if let Some(v) = get(entries, "type") {
+                        dev.mouse = v.trim().eq_ignore_ascii_case("mouse");
+                    }
                     dev.keyboard_layout = get(entries, "keyboard_layout")
                         .map(str::trim)
                         .filter(|v| !v.is_empty())
@@ -425,6 +431,18 @@ mod tests {
         assert!(!pad.passthrough);
         let kbd = cfg.devices.iter().find(|d| d.id == "kbd").expect("kbd");
         assert!(kbd.passthrough && kbd.grab && kbd.grab_explicit);
+    }
+
+    #[test]
+    fn type_mouse_is_the_only_type_that_changes_anything() {
+        let cfg = load_str(
+            "kbm-type.ini",
+            "[device.mouse]\nuniq = AA:BB:CC:DD:EE:FF\ntype = Mouse\n\n[device.pad]\nuniq = 11:22:33:44:55:66\n\n[device.kbd]\nuniq = 22:33:44:55:66:77\ntype = keyboard\n",
+        );
+        let by = |id: &str| cfg.devices.iter().find(|d| d.id == id).expect("device");
+        assert!(by("mouse").mouse);
+        assert!(!by("pad").mouse);
+        assert!(!by("kbd").mouse);
     }
 
     #[test]

@@ -17,6 +17,7 @@ sleep 1
 /usr/sbin/mntroot rw
 
 rm -f /etc/upstart/kindle-button-mapper.conf
+rm -f /etc/udev/rules.d/99-kindle-button-mapper-pointer.rules
 # Drop the job from upstart now that its .conf is gone, so it isn't left as a
 # known-but-fileless job until the next reboot.
 /sbin/initctl reload-configuration 2>/dev/null || true

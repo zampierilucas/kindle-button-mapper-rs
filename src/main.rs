@@ -210,7 +210,7 @@ fn device_worker(mut cfg: config::DeviceConfig, mut settings: WorkerSettings) {
     let mut generation = reload::generation();
 
     loop {
-        let handler = InputHandler::new(cfg.name.clone(), cfg.uniq.clone(), cfg.grab);
+        let handler = InputHandler::new(cfg.name.clone(), cfg.uniq.clone(), cfg.grab, cfg.mouse);
         match handler.open() {
             Ok((mut device, grabbed_at_open)) => {
                 // Only the opened node says whether this is a pad or a
@@ -249,14 +249,7 @@ fn device_worker(mut cfg: config::DeviceConfig, mut settings: WorkerSettings) {
                         }
                     }
                 }
-                // Relaying keys we do not hold would deliver every keystroke
-                // twice, once from us and once from whoever does hold it.
-                if cfg.passthrough && !grab {
-                    warn!(
-                        "[{}] passthrough needs the exclusive grab and something else has it, relaying is off",
-                        cfg.id
-                    );
-                    cfg.passthrough = false;
+                if downgrade_relay(&mut cfg, grab) {
                     mapper = Mapper::new(&cfg, &settings);
                 }
                 if grab && cfg.passthrough && !vkeyboard::available() {
@@ -265,14 +258,21 @@ fn device_worker(mut cfg: config::DeviceConfig, mut settings: WorkerSettings) {
                         cfg.id
                     );
                 }
+                if grab && cfg.mouse && !vkeyboard::pointer_ready() {
+                    warn!(
+                        "[{}] no uinput pointer, the cursor will not move while we hold the mouse",
+                        cfg.id
+                    );
+                }
 
                 info!(
                     "[{}] device connected ({})",
                     cfg.id,
-                    match (grab, cfg.passthrough) {
-                        (false, _) => "shared",
-                        (true, true) => "exclusive, unmapped keys passed through",
-                        (true, false) => "exclusive",
+                    match (grab, cfg.mouse, cfg.passthrough) {
+                        (false, _, _) => "shared",
+                        (true, true, _) => "exclusive, motion and unmapped buttons relayed",
+                        (true, false, true) => "exclusive, unmapped keys passed through",
+                        (true, false, false) => "exclusive",
                     }
                 );
                 if let Some(ref script) = settings.on_connect {
@@ -337,12 +337,11 @@ fn run_event_loop(
         if current != *generation {
             *generation = current;
             match reload::device_config(&cfg.id) {
-                Some(fresh) => {
+                Some(mut fresh) => {
                     info!("[{}] applying reloaded mappings", cfg.id);
                     if let Some(globals) = reload::settings() {
                         *settings = globals;
                     }
-                    *mapper = Mapper::new(&fresh, settings);
                     // Switching who owns the device has to bite now rather
                     // than on the next reconnect, or the toggle looks broken.
                     let want = effective_grab(&fresh, gamepad);
@@ -358,6 +357,8 @@ fn run_event_loop(
                             Err(e) => warn!("[{}] cannot change who holds the device: {}", cfg.id, e),
                         }
                     }
+                    downgrade_relay(&mut fresh, grab);
+                    *mapper = Mapper::new(&fresh, settings);
                     *cfg = fresh;
                 }
                 None => {
@@ -403,10 +404,17 @@ fn run_event_loop(
             continue;
         }
 
+        let relay = cfg.mouse && grab;
+
         let mut activity = false;
         for event in events {
             match event.kind() {
-                InputEventKind::Synchronization(_) => mapper.handle_sync(),
+                InputEventKind::Synchronization(_) => {
+                    mapper.handle_sync();
+                    if relay {
+                        vkeyboard::pointer_sync();
+                    }
+                }
                 InputEventKind::Key(key) if key.code() == 330 => {  // BTN_TOUCH
                     activity = true;
                     mapper.handle_touch(event.value() == 1);
@@ -448,6 +456,10 @@ fn run_event_loop(
                         _ => {}
                     }
                 }
+                InputEventKind::RelAxis(axis) if relay => {
+                    activity = true;
+                    vkeyboard::pointer_motion(axis.0, event.value());
+                }
                 _ => {}
             }
         }
@@ -464,10 +476,25 @@ fn run_event_loop(
 }
 
 /// Whether the daemon should hold this device exclusively. An explicit `grab`
-/// in the file is taken at its word; without one only a gamepad is claimed,
-/// since grabbing a keyboard would swallow every key nothing maps.
+/// in the file is taken at its word; without one only a gamepad or a mouse is
+/// claimed, since grabbing a keyboard would swallow every key nothing maps.
 fn effective_grab(cfg: &config::DeviceConfig, gamepad: bool) -> bool {
-    cfg.grab && (cfg.grab_explicit || gamepad)
+    cfg.grab && (cfg.grab_explicit || gamepad || cfg.mouse)
+}
+
+/// Relaying a device we do not hold would deliver everything twice. True when
+/// something was turned off and the mapper has to be rebuilt.
+fn downgrade_relay(cfg: &mut config::DeviceConfig, grab: bool) -> bool {
+    if grab || !(cfg.passthrough || cfg.mouse) {
+        return false;
+    }
+    warn!(
+        "[{}] relaying needs the exclusive grab and something else has it, it is off",
+        cfg.id
+    );
+    cfg.passthrough = false;
+    cfg.mouse = false;
+    true
 }
 
 /// Centre and half-travel per axis; pads disagree on range, the mapper sees a percentage.

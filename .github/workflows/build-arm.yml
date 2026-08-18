@@ -47,7 +47,7 @@ jobs:
           mkdir -p output/scripts output/illusion/MapperManager output/assets
           cp target/armv7-unknown-linux-musleabihf/release/kindle-button-mapper output/
           cp install.sh uninstall.sh config.ini output/
-          cp assets/kindle-button-mapper.upstart output/assets/
+          cp assets/kindle-button-mapper.upstart assets/99-kindle-button-mapper-pointer.rules output/assets/
           cp scripts/*.sh output/scripts/
           cp illusion/MapperManager.sh illusion/install-waf-app.sh output/illusion/
           cp illusion/MapperManager/config.xml illusion/MapperManager/index.html \
@@ -81,6 +81,7 @@ jobs:
             uninstall.sh \
             config.ini \
             assets/kindle-button-mapper.upstart \
+            assets/99-kindle-button-mapper-pointer.rules \
             $(ls scripts/*.sh) \
             illusion/MapperManager.sh \
             illusion/install-waf-app.sh \
