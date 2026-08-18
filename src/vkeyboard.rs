@@ -9,6 +9,7 @@ use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use std::thread;
 
 const UINPUT_DEV: &str = "/dev/uinput";
@@ -240,43 +241,26 @@ enum Pager {
     Buttons {
         path: PathBuf,
         node: Option<File>,
-        flipped: Flipped,
+        flipped: bool,
+        checked: Option<Instant>,
     },
     VirtualKeyboard,
 }
 
-#[derive(Default)]
-struct Flipped {
-    value: bool,
-    checked: Option<std::time::Instant>,
-}
-
-impl Flipped {
-    fn get(&mut self) -> bool {
-        if self
-            .checked
-            .is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1))
-        {
-            return self.value;
-        }
-        self.checked = Some(std::time::Instant::now());
-        self.value = matches!(orientation().as_deref(), Some("U"));
-        self.value
-    }
-}
-
-fn orientation() -> Option<String> {
+fn held_upside_down() -> bool {
     for prop in ["orientation", "accelerometer"] {
-        let out = Command::new("lipc-get-prop")
+        let Ok(out) = Command::new("lipc-get-prop")
             .args(["com.lab126.winmgr", prop])
             .output()
-            .ok()?;
-        let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !value.is_empty() {
-            return Some(value);
+        else {
+            continue;
+        };
+        match String::from_utf8_lossy(&out.stdout).trim() {
+            "" => continue,
+            value => return value == "U",
         }
     }
-    None
+    false
 }
 
 impl Pager {
@@ -287,7 +271,8 @@ impl Pager {
                 Pager::Buttons {
                     path,
                     node: None,
-                    flipped: Flipped::default(),
+                    flipped: false,
+                    checked: None,
                 }
             }
             None => {
@@ -303,8 +288,13 @@ impl Pager {
                 path,
                 node,
                 flipped,
+                checked,
             } => {
-                let button_code = if forward != flipped.get() {
+                if checked.is_none_or(|t| t.elapsed() > Duration::from_secs(1)) {
+                    *checked = Some(Instant::now());
+                    *flipped = held_upside_down();
+                }
+                let button_code = if forward != *flipped {
                     KEY_PAGEDOWN
                 } else {
                     KEY_PAGEUP
