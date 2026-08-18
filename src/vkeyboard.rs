@@ -9,6 +9,7 @@ use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use std::thread;
 
 const UINPUT_DEV: &str = "/dev/uinput";
@@ -212,8 +213,8 @@ impl Injector {
         let Injector { dev, pager } = self;
         match line {
             "" => (),
-            "page_next" => pager.turn(dev.as_mut(), KEY_PAGEDOWN, KEY_DOWN),
-            "page_prev" => pager.turn(dev.as_mut(), KEY_PAGEUP, KEY_UP),
+            "page_next" => pager.turn(dev.as_mut(), true),
+            "page_prev" => pager.turn(dev.as_mut(), false),
             _ => match crate::config::parse_key(line) {
                 Some(key) => match dev {
                     Some(vkbd) => {
@@ -237,8 +238,29 @@ impl Injector {
 /// page turn goes in as if the button had been pressed. Models without the
 /// buttons take KEY_DOWN/KEY_UP on the virtual keyboard instead.
 enum Pager {
-    Buttons { path: PathBuf, node: Option<File> },
+    Buttons {
+        path: PathBuf,
+        node: Option<File>,
+        flipped: bool,
+        checked: Option<Instant>,
+    },
     VirtualKeyboard,
+}
+
+fn held_upside_down() -> bool {
+    for prop in ["orientation", "accelerometer"] {
+        let Ok(out) = Command::new("lipc-get-prop")
+            .args(["com.lab126.winmgr", prop])
+            .output()
+        else {
+            continue;
+        };
+        match String::from_utf8_lossy(&out.stdout).trim() {
+            "" => continue,
+            value => return value == "U",
+        }
+    }
+    false
 }
 
 impl Pager {
@@ -246,7 +268,12 @@ impl Pager {
         match page_button_node() {
             Some(path) => {
                 info!("Page turns go to the page buttons at {}", path.display());
-                Pager::Buttons { path, node: None }
+                Pager::Buttons {
+                    path,
+                    node: None,
+                    flipped: false,
+                    checked: None,
+                }
             }
             None => {
                 info!("No page buttons found, page turns go to the virtual keyboard");
@@ -255,9 +282,23 @@ impl Pager {
         }
     }
 
-    fn turn(&mut self, vkbd: Option<&mut File>, button_code: u16, kbd_code: u16) {
+    fn turn(&mut self, vkbd: Option<&mut File>, forward: bool) {
         match self {
-            Pager::Buttons { path, node } => {
+            Pager::Buttons {
+                path,
+                node,
+                flipped,
+                checked,
+            } => {
+                if checked.is_none_or(|t| t.elapsed() > Duration::from_secs(1)) {
+                    *checked = Some(Instant::now());
+                    *flipped = held_upside_down();
+                }
+                let button_code = if forward != *flipped {
+                    KEY_PAGEDOWN
+                } else {
+                    KEY_PAGEUP
+                };
                 if node.is_none() {
                     match OpenOptions::new().write(true).open(&path) {
                         Ok(f) => *node = Some(f),
@@ -276,6 +317,7 @@ impl Pager {
             }
             Pager::VirtualKeyboard => match vkbd {
                 Some(vkbd) => {
+                    let kbd_code = if forward { KEY_DOWN } else { KEY_UP };
                     if let Err(e) = tap(vkbd, kbd_code) {
                         warn!("Page turn failed: {}", e);
                     }
