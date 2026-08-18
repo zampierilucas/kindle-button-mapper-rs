@@ -1,11 +1,11 @@
 use evdev::{Device, InputEventKind};
 use log::{error, info, warn};
 use std::fs;
+use std::cmp::Ordering;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::Command;
 use nix::sys::signal::{kill, Signal};
-use std::cmp::Ordering;
 use nix::unistd::Pid;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -251,18 +251,12 @@ fn url_decode(s: &str) -> String {
 
 // ---- handlers ----
 
-// path, name, uniq, mappable keys
 type Node = (String, String, String, usize);
 
-// Frontends resolve a configured device by taking the first node whose uniq
-// matches, so nodes sharing an address go best-first the way the daemon ranks
-// them — otherwise capture reads a node the daemon never opens.
 fn sort_nodes(nodes: &mut [Node]) {
     nodes.sort_by(|a, b| {
         let (left, right) = (crate::input::bare_addr(&a.2), crate::input::bare_addr(&b.2));
         left.cmp(&right)
-            // Only nodes of one address are ranked against each other. The
-            // built-in nodes carry no address and stay in path order.
             .then_with(|| if left.is_empty() { Ordering::Equal } else { b.3.cmp(&a.3) })
             .then_with(|| a.0.cmp(&b.0))
     });
