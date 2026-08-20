@@ -275,6 +275,11 @@ var MapperManager = (function() {
         entries.push([key, value]);
     }
 
+    function setOrDel(section, key, value) {
+        if (value) setValue(section, key, value);
+        else delValue(section, key);
+    }
+
     function delValue(section, key) {
         var entries = ini.sections[section];
         if (!entries) return;
@@ -906,7 +911,7 @@ var MapperManager = (function() {
             showMessage("Set a name or MAC", true);
             return;
         }
-        var grab = getEl("devDetailGrab").className.indexOf(" on") >= 0 ? "true" : "false";
+        var exclusive = getEl("devDetailGrab").className.indexOf(" on") >= 0;
 
         if (!editingDeviceId && listDeviceIds().indexOf(newId) >= 0) {
             showMessage("A device with that name already exists", true);
@@ -915,11 +920,14 @@ var MapperManager = (function() {
 
         var layout = getEl("devDetailLayout").getAttribute("data-code") || "";
 
-        setValue("device." + newId, "name", name);
-        setValue("device." + newId, "grab", grab);
-        if (uniq) { setValue("device." + newId, "uniq", uniq); } else { delValue("device." + newId, "uniq"); }
-        if (layout) { setValue("device." + newId, "keyboard_layout", layout); } else { delValue("device." + newId, "keyboard_layout"); }
-        delValue("device." + newId, "path");
+        var section = "device." + newId;
+        var pinned = getValue(section, "grab") !== null || exclusive;
+
+        setValue(section, "name", name);
+        setOrDel(section, "grab", pinned ? String(exclusive) : "");
+        setOrDel(section, "uniq", uniq);
+        setOrDel(section, "keyboard_layout", layout);
+        delValue(section, "path");
 
         if (!currentDeviceId) currentDeviceId = newId;
         closeDeviceDetail();
