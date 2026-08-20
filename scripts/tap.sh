@@ -97,6 +97,8 @@ ev() { le32 0; le32 0; le16 "$1"; le16 "$2"; le32 "$3"; }
 
 DOWN=$(
     ev 1 330 1     # BTN_TOUCH down
+    ev 3 47 0      # ABS_MT_SLOT, protocol B wants the slot before its axes
+    ev 3 55 0      # ABS_MT_TOOL_TYPE, finger
     ev 3 57 0      # ABS_MT_TRACKING_ID
     ev 3 58 18     # ABS_MT_PRESSURE
     ev 3 53 "$X"   # ABS_MT_POSITION_X
@@ -107,6 +109,7 @@ DOWN=$(
 )
 UP=$(
     ev 1 330 0     # BTN_TOUCH up
+    ev 3 47 0      # ABS_MT_SLOT, a real finger in between may have moved it
     ev 3 57 -1     # ABS_MT_TRACKING_ID, contact lifted
     ev 0 0 0
 )
