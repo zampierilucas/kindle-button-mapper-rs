@@ -17,7 +17,6 @@ var MapperManager = (function() {
     var ini = null;            // parsed config
     var pendingSlot = null;    // slot object awaiting an action pick
     var captureXhrAbort = null;
-    var grabWasSet = false;   // config had an explicit grab key, or the user touched the toggle
     var actionTab = "auto";     // which tab is showing in the action picker
     var currentDeviceId = null; // currently selected device on Bindings tab
     var editingDeviceId = null; // device being edited in the detail overlay (null = new)
@@ -274,6 +273,11 @@ var MapperManager = (function() {
             if (entries[i][0] === key) { entries[i][1] = value; return; }
         }
         entries.push([key, value]);
+    }
+
+    function setOrDel(section, key, value) {
+        if (value) setValue(section, key, value);
+        else delValue(section, key);
     }
 
     function delValue(section, key) {
@@ -859,7 +863,6 @@ var MapperManager = (function() {
         getEl("devDetailName").value = prefillName || "";
         getEl("devDetailUniq").value = prefillUniq || "";
         getEl("devDetailGrab").className = "toggle";
-        grabWasSet = false;
         setDeviceLayout("");
         getEl("btnDeviceDelete").style.display = "none";
         updateDeviceIdView();
@@ -871,9 +874,8 @@ var MapperManager = (function() {
         getEl("deviceDetailTitle").innerHTML = "Edit device";
         getEl("devDetailName").value = getValue("device." + id, "name") || "";
         getEl("devDetailUniq").value = getValue("device." + id, "uniq") || "";
-        var stored = getValue("device." + id, "grab");
-        grabWasSet = stored !== null;
-        getEl("devDetailGrab").className = "toggle" + ((stored || "").toLowerCase() === "true" ? " on" : "");
+        var grab = (getValue("device." + id, "grab") || "").toLowerCase() === "true";
+        getEl("devDetailGrab").className = "toggle" + (grab ? " on" : "");
         setDeviceLayout(getValue("device." + id, "keyboard_layout") || "");
         getEl("btnDeviceDelete").style.display = "block";
         getEl("devDetailIdView").innerHTML = escapeHtml(id);
@@ -891,7 +893,6 @@ var MapperManager = (function() {
     function toggleDeviceDetailGrab() {
         var t = getEl("devDetailGrab");
         t.className = t.className.indexOf(" on") >= 0 ? "toggle" : "toggle on";
-        grabWasSet = true;
     }
 
     function autoIdFromName(s) {
@@ -910,7 +911,7 @@ var MapperManager = (function() {
             showMessage("Set a name or MAC", true);
             return;
         }
-        var grab = getEl("devDetailGrab").className.indexOf(" on") >= 0 ? "true" : "false";
+        var exclusive = getEl("devDetailGrab").className.indexOf(" on") >= 0;
 
         if (!editingDeviceId && listDeviceIds().indexOf(newId) >= 0) {
             showMessage("A device with that name already exists", true);
@@ -919,11 +920,14 @@ var MapperManager = (function() {
 
         var layout = getEl("devDetailLayout").getAttribute("data-code") || "";
 
-        setValue("device." + newId, "name", name);
-        if (grabWasSet) { setValue("device." + newId, "grab", grab); } else { delValue("device." + newId, "grab"); }
-        if (uniq) { setValue("device." + newId, "uniq", uniq); } else { delValue("device." + newId, "uniq"); }
-        if (layout) { setValue("device." + newId, "keyboard_layout", layout); } else { delValue("device." + newId, "keyboard_layout"); }
-        delValue("device." + newId, "path");
+        var section = "device." + newId;
+        var pinned = getValue(section, "grab") !== null || exclusive;
+
+        setValue(section, "name", name);
+        setOrDel(section, "grab", pinned ? String(exclusive) : "");
+        setOrDel(section, "uniq", uniq);
+        setOrDel(section, "keyboard_layout", layout);
+        delValue(section, "path");
 
         if (!currentDeviceId) currentDeviceId = newId;
         closeDeviceDetail();
