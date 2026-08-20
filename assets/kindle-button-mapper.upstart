@@ -8,6 +8,20 @@ respawn limit 5 60
 
 console none
 
+pre-start script
+    base=/mnt/us/kindle-button-mapper
+    cp /proc/last_kmsg "$base/last_kmsg.txt" 2>/dev/null || true
+    n=$(cat "$base/boot_attempts" 2>/dev/null || echo 0)
+    case "$n" in ''|*[!0-9]*) n=0 ;; esac
+    if [ "$n" -ge 3 ]; then
+        echo "$(date) autostart disabled after $n starts without a stable run" >> "$base/boot.log"
+        stop
+        exit 0
+    fi
+    echo $((n + 1)) > "$base/boot_attempts"
+    echo "$(date) start attempt $((n + 1))" >> "$base/boot.log"
+end script
+
 script
     exec /mnt/us/kindle-button-mapper/kindle-button-mapper /mnt/us/kindle-button-mapper/config.ini >>/var/log/kindle-button-mapper.log 2>&1
 end script
