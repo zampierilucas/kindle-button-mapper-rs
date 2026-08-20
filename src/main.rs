@@ -72,6 +72,11 @@ fn main() {
         }
     };
 
+    thread::spawn(|| {
+        thread::sleep(Duration::from_secs(120));
+        let _ = std::fs::remove_file("/mnt/us/kindle-button-mapper/boot_attempts");
+    });
+
     info!(
         "Kindle Button Mapper {} (build {}) starting...",
         env!("CARGO_PKG_VERSION"),

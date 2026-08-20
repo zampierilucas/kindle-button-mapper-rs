@@ -54,6 +54,8 @@ chmod +x "$INSTALL_DIR/kindle-button-mapper" \
          "$INSTALL_DIR/scripts/"*.sh \
          "$INSTALL_DIR/illusion/"*.sh
 
+rm -f "$INSTALL_DIR/boot_attempts"
+
 /usr/sbin/mntroot rw
 
 cp "$INSTALL_DIR/assets/kindle-button-mapper.upstart" /etc/upstart/kindle-button-mapper.conf
