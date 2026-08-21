@@ -7,9 +7,11 @@ mod mapper;
 mod pause;
 mod reload;
 mod vkeyboard;
+mod gesture;
 mod waf_helper;
 
 use config::Config;
+use std::collections::HashMap;
 use evdev::InputEventKind;
 use input::InputHandler;
 use layout::LayoutOverride;
@@ -78,8 +80,9 @@ fn main() {
         env!("BUILD_SHA")
     );
     info!(
-        "Config: devices={}, debounce={}ms, long_press={}ms, repeat={}ms",
+        "Config: devices={}, gestures={}, debounce={}ms, long_press={}ms, repeat={}ms",
         config.devices.len(),
+        config.gesture_templates.len(),
         config.debounce_ms,
         config.long_press_ms,
         config.repeat_ms,
@@ -109,15 +112,7 @@ fn main() {
         .filter(|l| !l.is_empty())
         .and_then(LayoutOverride::new);
 
-    let settings = WorkerSettings {
-        debounce_ms: config.debounce_ms,
-        long_press_ms: config.long_press_ms,
-        repeat_ms: config.repeat_ms,
-        log_buttons: config.log_buttons,
-        keep_awake: config.keep_awake,
-        on_connect: config.on_connect.clone(),
-        on_disconnect: config.on_disconnect.clone(),
-    };
+    let settings = WorkerSettings::from_config(&config);
     for device in config.devices {
         if reload::claim(&device.id) {
             spawn_worker(device, settings.clone());
@@ -145,14 +140,36 @@ fn spawn_worker(device: config::DeviceConfig, settings: WorkerSettings) {
 }
 
 #[derive(Clone)]
-struct WorkerSettings {
+pub(crate) struct WorkerSettings {
     debounce_ms: u64,
     long_press_ms: u64,
     repeat_ms: u64,
     log_buttons: bool,
+    stick_deadzone: i32,
+    gesture_min_percent: i32,
+    gesture_tolerance: f32,
+    gesture_templates: Vec<(String, Vec<gesture::Point>)>,
     keep_awake: bool,
     on_connect: Option<String>,
     on_disconnect: Option<String>,
+}
+
+impl WorkerSettings {
+    pub(crate) fn from_config(c: &config::Config) -> Self {
+        Self {
+            debounce_ms: c.debounce_ms,
+            long_press_ms: c.long_press_ms,
+            repeat_ms: c.repeat_ms,
+            log_buttons: c.log_buttons,
+            stick_deadzone: c.stick_deadzone,
+            gesture_min_percent: c.gesture_min_percent,
+            gesture_tolerance: c.gesture_tolerance,
+            gesture_templates: c.gesture_templates.clone(),
+            keep_awake: c.keep_awake,
+            on_connect: c.on_connect.clone(),
+            on_disconnect: c.on_disconnect.clone(),
+        }
+    }
 }
 
 /// Why the event loop gave the device back.
@@ -182,17 +199,8 @@ fn park_until_reconfigured(id: &str, generation: &mut u64) -> config::DeviceConf
     }
 }
 
-fn device_worker(mut cfg: config::DeviceConfig, settings: WorkerSettings) {
-    let build = |cfg: &config::DeviceConfig| {
-        Mapper::new(
-            cfg,
-            settings.debounce_ms,
-            settings.long_press_ms,
-            settings.repeat_ms,
-            settings.log_buttons,
-        )
-    };
-    let mut mapper = build(&cfg);
+fn device_worker(mut cfg: config::DeviceConfig, mut settings: WorkerSettings) {
+    let mut mapper = Mapper::new(&cfg, &settings);
     let mut generation = reload::generation();
 
     loop {
@@ -205,7 +213,7 @@ fn device_worker(mut cfg: config::DeviceConfig, settings: WorkerSettings) {
                 if cfg.is_unmapped() {
                     if gamepad {
                         cfg.apply_default_layout();
-                        mapper = build(&cfg);
+                        mapper = Mapper::new(&cfg, &settings);
                     } else if cfg.keyboard_layout.is_none() {
                         info!(
                             "[{}] no mappings and not a gamepad — leaving it alone until something is mapped",
@@ -214,7 +222,7 @@ fn device_worker(mut cfg: config::DeviceConfig, settings: WorkerSettings) {
                         // Dropping the device releases the grab.
                         drop(device);
                         cfg = park_until_reconfigured(&cfg.id, &mut generation);
-                        mapper = build(&cfg);
+                        mapper = Mapper::new(&cfg, &settings);
                         continue;
                     }
                 }
@@ -243,7 +251,7 @@ fn device_worker(mut cfg: config::DeviceConfig, settings: WorkerSettings) {
                         cfg.id
                     );
                     cfg.passthrough = false;
-                    mapper = build(&cfg);
+                    mapper = Mapper::new(&cfg, &settings);
                 }
                 if grab && cfg.passthrough && !vkeyboard::available() {
                     warn!(
@@ -266,11 +274,11 @@ fn device_worker(mut cfg: config::DeviceConfig, settings: WorkerSettings) {
                     execute_script(script);
                 }
                 match run_event_loop(&mut device, &mut mapper, grab, gamepad,
-                    &mut cfg, &mut generation, &settings) {
+                    &mut cfg, &mut generation, &mut settings) {
                     Exit::Removed => {
                         drop(device);
                         cfg = park_until_reconfigured(&cfg.id, &mut generation);
-                        mapper = build(&cfg);
+                        mapper = Mapper::new(&cfg, &settings);
                         continue;
                     }
                     Exit::Disconnected(e) => {
@@ -298,10 +306,16 @@ fn run_event_loop(
     gamepad: bool,
     cfg: &mut config::DeviceConfig,
     generation: &mut u64,
-    settings: &WorkerSettings,
+    settings: &mut WorkerSettings,
 ) -> Exit {
     // Non-blocking + poll so we can notice a capture pause while idle.
     set_nonblocking(device.as_raw_fd());
+    let ranges = stick_ranges(device);
+    // ABS_X/ABS_Y mean a contact on a touch device and a stick on a pad, so
+    // the device decides which once, not every event.
+    let touch_device = device
+        .supported_keys()
+        .is_some_and(|k| k.contains(evdev::Key::BTN_TOUCH));
     let mut grab = grab;
     let mut grabbed = grab;
 
@@ -319,13 +333,10 @@ fn run_event_loop(
             match reload::device_config(&cfg.id) {
                 Some(fresh) => {
                     info!("[{}] applying reloaded mappings", cfg.id);
-                    *mapper = Mapper::new(
-                        &fresh,
-                        settings.debounce_ms,
-                        settings.long_press_ms,
-                        settings.repeat_ms,
-                        settings.log_buttons,
-                    );
+                    if let Some(globals) = reload::settings() {
+                        *settings = globals;
+                    }
+                    *mapper = Mapper::new(&fresh, settings);
                     // Switching who owns the device has to bite now rather
                     // than on the next reconnect, or the toggle looks broken.
                     let want = effective_grab(&fresh, gamepad);
@@ -389,6 +400,11 @@ fn run_event_loop(
         let mut activity = false;
         for event in events {
             match event.kind() {
+                InputEventKind::Synchronization(_) => mapper.handle_sync(),
+                InputEventKind::Key(key) if key.code() == 330 => {  // BTN_TOUCH
+                    activity = true;
+                    mapper.handle_touch(event.value() == 1);
+                }
                 InputEventKind::Key(key) => {
                     activity = true;
                     match event.value() {
@@ -410,6 +426,18 @@ fn run_event_loop(
                         9 | 10 => {
                             activity = true;
                             mapper.handle_trigger(code, event.value());
+                        }
+                        0 | 1 if touch_device => {
+                            activity = true;
+                            mapper.handle_touch_move(code == 0, stick_percent(&ranges, code, event.value()));
+                        }
+                        0 | 1 | 3 | 4 => {
+                            activity = true;
+                            mapper.handle_stick(code, stick_percent(&ranges, code, event.value()));
+                        }
+                        53 | 54 => {
+                            activity = true;
+                            mapper.handle_touch_move(code == 53, stick_percent(&ranges, code, event.value()));
                         }
                         _ => {}
                     }
@@ -434,6 +462,29 @@ fn run_event_loop(
 /// since grabbing a keyboard would swallow every key nothing maps.
 fn effective_grab(cfg: &config::DeviceConfig, gamepad: bool) -> bool {
     cfg.grab && (cfg.grab_explicit || gamepad)
+}
+
+/// Centre and half-travel per axis; pads disagree on range, the mapper sees a percentage.
+fn stick_ranges(dev: &evdev::Device) -> HashMap<u16, (i32, i32)> {
+    let states = match dev.get_abs_state() {
+        Ok(s) => s,
+        Err(_) => return HashMap::new(),
+    };
+    [0u16, 1, 3, 4, 53, 54]
+        .iter()
+        .filter_map(|&code| {
+            let i = states.get(code as usize)?;
+            let half = ((i.maximum - i.minimum) / 2).max(1);
+            Some((code, ((i.minimum + i.maximum) / 2, half)))
+        })
+        .collect()
+}
+
+fn stick_percent(ranges: &HashMap<u16, (i32, i32)>, code: u16, value: i32) -> i32 {
+    match ranges.get(&code) {
+        Some((centre, half)) => ((value - centre) * 100 / half).clamp(-100, 100),
+        None => 0,
+    }
 }
 
 fn is_gamepad(dev: &evdev::Device) -> bool {

@@ -24,7 +24,8 @@ var MapperManager = (function() {
     var deviceScanTimer = null; // Device tab auto-refresh interval
     var lastDevicesSig = "";    // last /devices result, to skip redundant renders
 
-    var DEVICE_KINDS = ["buttons", "longpress", "dpad", "dpad_longpress", "triggers", "triggers_longpress"];
+    var DEVICE_KINDS = ["buttons", "longpress", "dpad", "dpad_longpress", "triggers", "triggers_longpress",
+                        "stick_left", "stick_right", "gestures"];
 
     var _kbdKeys = null;
     function buildKeyboardKeys() {
@@ -386,7 +387,10 @@ var MapperManager = (function() {
                 { kind: "dpad",               label: "DPad" },
                 { kind: "dpad_longpress",     label: "DPad Long" },
                 { kind: "triggers",           label: "Trigger" },
-                { kind: "triggers_longpress", label: "Trig Long" }
+                { kind: "triggers_longpress", label: "Trig Long" },
+                { kind: "stick_left",         label: "L Stick" },
+                { kind: "stick_right",        label: "R Stick" },
+                { kind: "gestures",           label: "Gesture" }
             ];
 
             for (var s = 0; s < sectionList.length; s++) {
@@ -412,11 +416,21 @@ var MapperManager = (function() {
     function renderBindingRow(section, label, key, script) {
         var parsed = extractAction(script);
         var actionLabel = labelForAction(parsed) || parsed.id || script;
-        return '<div class="binding-row" data-section="' + escapeHtml(section) + '" data-key="' + escapeHtml(key) + '">'
+        var attrs = ' data-section="' + escapeHtml(section) + '" data-key="' + escapeHtml(key) + '"';
+        // Only a gesture carries a name the user chose, so only it can be renamed.
+        var rename = isGestureSection(section)
+            ? '<button class="binding-del binding-ren"' + attrs + '>Name</button>'
+            : '';
+        return '<div class="binding-row"' + attrs + '>'
             + '<span class="binding-slot">' + escapeHtml(label) + " " + escapeHtml(key) + '</span>'
             + '<span class="binding-action">' + escapeHtml(actionLabel) + '</span>'
-            + '<button class="binding-del" data-section="' + escapeHtml(section) + '" data-key="' + escapeHtml(key) + '">&#x2715;</button>'
+            + '<button class="binding-del"' + attrs + '>&#x2715;</button>'
+            + rename
             + '</div>';
+    }
+
+    function isGestureSection(section) {
+        return section && section.slice(-9) === ".gestures";
     }
 
     function extractAction(script) {
@@ -485,8 +499,12 @@ var MapperManager = (function() {
             return;
         }
         var kind = e.currentTarget.getAttribute("data-slot-kind");
-        if (kind === "button") {
+        if (kind === "button" || kind === "stick") {
             captureNewButton(false);
+            return;
+        }
+        if (kind === "gesture") {
+            recordGesture();
             return;
         }
         var slot = mapKindToSlot(kind);
@@ -574,10 +592,117 @@ var MapperManager = (function() {
                 slot = { kind: "dpad", key: dir };
             } else if (data.kind === "trigger") {
                 slot = { kind: "triggers", key: data.code === 10 ? "lt" : "rt" };
+            } else if (data.kind === "stick") {
+                var horizontal = (data.code === 0 || data.code === 3);
+                slot = {
+                    kind: (data.code === 0 || data.code === 1) ? "stick_left" : "stick_right",
+                    key: horizontal ? (data.value > 0 ? "right" : "left")
+                                    : (data.value > 0 ? "down" : "up")
+                };
             }
             if (!slot) { showMessage("unknown event", true); return; }
             pendingSlot = { section: devSection(slot.kind), key: slot.key };
             openActionPicker();
+        });
+    }
+
+    function recordGesture() {
+        var used = ini.sections["gestures"] || [];
+        var n = used.length + 1;
+        var name = "gesture" + n;
+        for (var i = 0; i < used.length; i++) {
+            if (used[i][0] === name) { n++; name = "gesture" + n; i = -1; }
+        }
+        if (!currentDeviceId) { showMessage("Add a device first", true); return; }
+        showMessage("Finding device...", false);
+        resolveDevicePath(currentDeviceId, function(devPath, err) {
+            if (!devPath) { showMessage(err || "Device not connected", true); return; }
+            startGestureRecord(devPath, name);
+        });
+    }
+
+    function startGestureRecord(devPath, name) {
+        showOverlay("captureOverlay");
+        getEl("captureMsg").innerHTML = "Make the gesture on the device";
+        getEl("captureHint").innerHTML = "Recording " + escapeHtml(name) + " on " + escapeHtml(devPath);
+
+        var url = "/record-gesture?device=" + encodeURIComponent(devPath) + "&timeout=12000";
+        captureXhrAbort = request("GET", url, null, function(text, err) {
+            captureXhrAbort = null;
+            hideOverlay("captureOverlay");
+            if (err) { showMessage("Record: " + err, true); return; }
+            var data;
+            try { data = JSON.parse(text); } catch (e) { showMessage("bad JSON", true); return; }
+            if (!data.ok) { showMessage(data.error || "record failed", true); return; }
+            askName("Name this gesture", name, function(chosen) {
+                var key = gestureName(chosen || name);
+                setValue("gestures", key, data.points);
+                pendingSlot = { section: devSection("gestures"), key: key };
+                openActionPicker();
+            });
+        });
+    }
+
+    // ---- Gesture names ----
+
+    var nameCallback = null;
+
+    function askName(title, current, cb) {
+        nameCallback = cb;
+        getEl("nameTitle").innerHTML = escapeHtml(title);
+        getEl("nameInput").value = current || "";
+        showOverlay("nameOverlay");
+    }
+
+    function closeName(value) {
+        hideOverlay("nameOverlay");
+        var cb = nameCallback;
+        nameCallback = null;
+        if (cb) cb(value);
+    }
+
+    function onNameOk() {
+        closeName(getEl("nameInput").value.replace(/^\s+|\s+$/g, ""));
+    }
+
+    // An ini key the parser will not choke on, and not one already taken.
+    function gestureName(typed) {
+        var base = typed.replace(/[=;#\[\]\r\n]/g, "").replace(/^\s+|\s+$/g, "");
+        if (!base) base = "gesture";
+        var out = base;
+        var n = 2;
+        while (gestureExists(out)) { out = base + " " + n; n++; }
+        return out;
+    }
+
+    // The daemon's parser folds case, so two names differing only in case are
+    // one gesture to it.
+    function gestureExists(name) {
+        var entries = ini.sections["gestures"] || [];
+        for (var i = 0; i < entries.length; i++) {
+            if (entries[i][0].toLowerCase() === name.toLowerCase()) return true;
+        }
+        return false;
+    }
+
+    function renameGesture(section, oldKey) {
+        askName("Rename gesture", oldKey, function(chosen) {
+            if (!chosen || chosen === oldKey) return;
+            var points = getValue("gestures", oldKey);
+            delValue("gestures", oldKey);
+            var key = gestureName(chosen);
+            if (points !== null) setValue("gestures", key, points);
+            // Every device binding this gesture has to follow the name.
+            for (var i = 0; i < ini.order.length; i++) {
+                var sec = ini.order[i];
+                if (!isGestureSection(sec)) continue;
+                var script = getValue(sec, oldKey);
+                if (script === null) continue;
+                delValue(sec, oldKey);
+                setValue(sec, key, script);
+            }
+            renderBindings();
+            showMessage("Renamed to " + key + " (unsaved)", false);
         });
     }
 
@@ -699,6 +824,11 @@ var MapperManager = (function() {
     function onBindingsListClick(e) {
         var target = e.target;
         if (!target) return;
+
+        if (target.className && target.className.indexOf("binding-ren") >= 0) {
+            renameGesture(target.getAttribute("data-section"), target.getAttribute("data-key"));
+            return;
+        }
 
         // Delete button takes priority over row-tap.
         if (target.className && target.className.indexOf("binding-del") >= 0) {
@@ -1007,7 +1137,9 @@ var MapperManager = (function() {
             if (err) { getEl("logsContent").innerHTML = escapeHtml("Error: " + err); return; }
             var lines = (text || "").split("\n");
             for (var i = 0; i < lines.length; i++) { lines[i] = formatLogLine(lines[i]); }
-            getEl("logsContent").innerHTML = escapeHtml(lines.join("\n")) || "(empty)";
+            var el = getEl("logsContent");
+            el.innerHTML = escapeHtml(lines.join("\n")) || "(empty)";
+            el.scrollTop = el.scrollHeight;
         });
     }
 
@@ -1038,6 +1170,8 @@ var MapperManager = (function() {
         getEl("btnLogsClose").addEventListener("click", closeLogs, false);
         getEl("btnSaveRaw").addEventListener("click", saveRawConfig, false);
         getEl("btnCaptureCancel").addEventListener("click", cancelCapture, false);
+        getEl("btnNameOk").addEventListener("click", onNameOk, false);
+        getEl("btnNameCancel").addEventListener("click", function() { closeName(null); }, false);
         getEl("btnActionCancel").addEventListener("click", function() {
             hideOverlay("actionOverlay"); pendingSlot = null; continuousCapture = false;
         }, false);
@@ -1140,17 +1274,21 @@ var MapperManager = (function() {
         document.body.style.overflow = "hidden";
     }
 
+    var BOOT_ATTEMPTS = 20;
+
     function bootstrapFetch(attempt) {
         attempt = attempt || 0;
         getJSON("/actions", function(data, err) {
-            if (err && attempt < 5) {
+            if (err && attempt < BOOT_ATTEMPTS) {
+                if (attempt === 1) showMessage("Waiting for the daemon...", false);
                 setTimeout(function() { bootstrapFetch(attempt + 1); }, 500);
                 return;
             }
             if (data && data.actions) actions = data.actions;
             request("GET", "/config", null, function(text, err2) {
                 if (err2) {
-                    if (attempt < 5) {
+                    if (attempt < BOOT_ATTEMPTS) {
+                        if (attempt === 1) showMessage("Waiting for the daemon...", false);
                         setTimeout(function() { bootstrapFetch(attempt + 1); }, 500);
                         return;
                     }

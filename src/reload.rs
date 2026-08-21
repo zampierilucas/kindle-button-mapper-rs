@@ -16,6 +16,9 @@ static REQUESTED: AtomicBool = AtomicBool::new(false);
 /// Bumped once per applied reload. Workers compare against their own copy.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 static DEVICES: OnceLock<Mutex<Vec<DeviceConfig>>> = OnceLock::new();
+/// The `[settings]` and `[gestures]` half of the file, so a reload refreshes
+/// them too instead of every worker keeping its startup copy forever.
+static SETTINGS: Mutex<Option<crate::WorkerSettings>> = Mutex::new(None);
 /// Device ids that already have a worker. Only grows, so a device removed and
 /// re-added does not end up with two threads fighting over the same node.
 static WATCHED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -47,6 +50,13 @@ pub fn generation() -> u64 {
 
 pub fn publish(config: &Config) {
     *devices().lock().unwrap_or_else(|p| p.into_inner()) = config.devices.clone();
+    *SETTINGS.lock().unwrap_or_else(|p| p.into_inner()) =
+        Some(crate::WorkerSettings::from_config(config));
+}
+
+/// The global settings as of the last reload.
+pub fn settings() -> Option<crate::WorkerSettings> {
+    SETTINGS.lock().unwrap_or_else(|p| p.into_inner()).clone()
 }
 
 /// The device's current config, or None if it was removed from the file.
@@ -87,5 +97,26 @@ pub fn poll(config_path: &str) -> Vec<DeviceConfig> {
             warn!("Reload failed, keeping the running config: {}", e);
             Vec::new()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_reload_refreshes_the_gestures_workers_read() {
+        let mut cfg = Config::default();
+        publish(&cfg);
+        assert!(settings().expect("published").gesture_templates.is_empty());
+
+        cfg.gesture_templates
+            .push(("flick".into(), vec![(0.0, 0.0), (1.0, 1.0)]));
+        cfg.gesture_tolerance = 0.42;
+        publish(&cfg);
+
+        let s = settings().expect("published");
+        assert_eq!(s.gesture_templates.len(), 1);
+        assert_eq!(s.gesture_tolerance, 0.42);
     }
 }
