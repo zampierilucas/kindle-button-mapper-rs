@@ -134,8 +134,13 @@ The daemon reads requests off `/var/run/kindle-button-mapper-key.fifo`, which is
 how `scripts/key.sh` works without any external tool, and it picks the device.
 On a model with physical page buttons the framework only turns pages for that
 node, so the daemon writes `KEY_PAGEDOWN`/`KEY_PAGEUP` straight into it and the
-reader sees a normal button press. Everywhere else the native reader takes
-`KEY_DOWN` as next page and `KEY_UP` as previous page on the virtual keyboard.
+reader sees a normal button press. Everywhere else the window manager swallows
+page keys, since it only forwards them on models `devcap-get-feature -a
+button.keypad` says have the buttons, so the daemon sends PageDown/PageUp over
+the X socket straight to the window `winmgr` reports in front, which is the
+reader you are looking at. If that window cannot be found it falls back to
+`KEY_DOWN` as next page and `KEY_UP` as previous page on the virtual keyboard,
+which is what the reader takes on some models.
 
 Some firmware ignores injected keys altogether, so `next_page_tap` and
 `prev_page_tap` go in as a touch on the screen instead, near the right and left

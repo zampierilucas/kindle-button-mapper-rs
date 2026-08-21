@@ -7,6 +7,7 @@ mod mapper;
 mod pause;
 mod reload;
 mod vkeyboard;
+mod xkey;
 mod gesture;
 mod waf_helper;
 
