@@ -120,6 +120,7 @@ fn route(method: &str, path: &str, body: &str, config_path: &str) -> (u16, Strin
         ("GET", "/actions") => (200, actions_json()),
         ("GET", "/layouts") => (200, layouts_json()),
         ("GET", "/capture") => capture(&query),
+        ("GET", "/record-gesture") => record_gesture(&query),
         ("POST", "/reload") => reload_daemon(),
         ("POST", "/stop") => stop_daemon(),
         ("POST", "/start") => start_daemon(),
@@ -377,6 +378,115 @@ fn logs_text() -> String {
     }
 }
 
+fn record_gesture(query: &std::collections::HashMap<String, String>) -> (u16, String) {
+    let lock = match CAPTURE_LOCK.try_lock() {
+        Ok(g) => g,
+        Err(_) => return (200, json_err("capture already running")),
+    };
+    let path = match query.get("device") {
+        Some(p) if !p.is_empty() => p.clone(),
+        _ => return (200, json_err("missing device param")),
+    };
+    let timeout_ms: u64 = query
+        .get("timeout")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10000)
+        .min(20000);
+
+    let _pause = PauseGuard;
+    let _ = crate::pause::begin();
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut device = match evdev::Device::open(&path) {
+        Ok(d) => d,
+        Err(e) => {
+            drop(lock);
+            return (200, json_err(&format!("open {}: {}", path, e)));
+        }
+    };
+
+    let ranges = axis_ranges(&device);
+    use nix::libc;
+    use std::os::unix::io::AsRawFd;
+    unsafe {
+        let fd = device.as_raw_fd();
+        let flags = libc::fcntl(fd, libc::F_GETFL, 0);
+        libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+    }
+
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut stroke = crate::gesture::Stroke::default();
+
+    while Instant::now() < deadline {
+        let events = match device.fetch_events() {
+            Ok(e) => e,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            }
+            Err(e) => {
+                drop(lock);
+                return (200, json_err(&format!("read: {}", e)));
+            }
+        };
+        for ev in events {
+            match ev.kind() {
+                InputEventKind::Synchronization(_) => stroke.sync(),
+                InputEventKind::Key(k) if k.code() == 330 => {
+                    if ev.value() == 1 {
+                        stroke.press();
+                    } else if let Some(path) = stroke.release() {
+                        if crate::gesture::travel(&path) >= 10.0 {
+                            let pts = crate::gesture::normalize(&path);
+                            drop(lock);
+                            return (
+                                200,
+                                format!(
+                                    "{{\"ok\":true,\"points\":\"{}\"}}",
+                                    crate::gesture::to_string(&pts)
+                                ),
+                            );
+                        }
+                    }
+                }
+                InputEventKind::AbsAxis(axis) => {
+                    let code = axis.0;
+                    if code == 0 || code == 53 {
+                        stroke.axis(true, axis_percent(&ranges, code, ev.value()));
+                    } else if code == 1 || code == 54 {
+                        stroke.axis(false, axis_percent(&ranges, code, ev.value()));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    drop(lock);
+    (200, json_err("timeout"))
+}
+
+fn axis_ranges(dev: &evdev::Device) -> std::collections::HashMap<u16, (i32, i32)> {
+    let states = match dev.get_abs_state() {
+        Ok(s) => s,
+        Err(_) => return std::collections::HashMap::new(),
+    };
+    [0u16, 1, 53, 54]
+        .iter()
+        .filter_map(|&code| {
+            let i = states.get(code as usize)?;
+            let half = ((i.maximum - i.minimum) / 2).max(1);
+            Some((code, ((i.minimum + i.maximum) / 2, half)))
+        })
+        .collect()
+}
+
+fn axis_percent(ranges: &std::collections::HashMap<u16, (i32, i32)>, code: u16, value: i32) -> i32 {
+    match ranges.get(&code) {
+        Some((centre, half)) => ((value - centre) * 100 / half).clamp(-100, 100),
+        None => 0,
+    }
+}
+
 fn capture(query: &std::collections::HashMap<String, String>) -> (u16, String) {
     let lock = match CAPTURE_LOCK.try_lock() {
         Ok(g) => g,
@@ -446,6 +556,7 @@ fn capture(query: &std::collections::HashMap<String, String>) -> (u16, String) {
                     let kind = match code {
                         16 | 17 => "dpad",
                         9 | 10 => "trigger",
+                        0 | 1 | 3 | 4 => "stick",
                         _ => continue,
                     };
                     drop(lock);

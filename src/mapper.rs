@@ -13,6 +13,15 @@ pub struct Mapper {
     dpad_longpress_mappings: HashMap<DpadDirection, String>,
     trigger_mappings: HashMap<Trigger, String>,
     trigger_longpress_mappings: HashMap<Trigger, String>,
+    stick_left_mappings: HashMap<DpadDirection, String>,
+    stick_right_mappings: HashMap<DpadDirection, String>,
+    stick_deadzone: i32,
+    stick_pushed: HashMap<u16, bool>,
+    gesture_mappings: HashMap<String, String>,
+    gesture_min_percent: i32,
+    gesture_tolerance: f32,
+    gesture_templates: Vec<(String, Vec<crate::gesture::Point>)>,
+    stroke: crate::gesture::Stroke,
     debounce_ms: u64,
     long_press_ms: u64,
     repeat_ms: u64,
@@ -37,13 +46,7 @@ pub struct Mapper {
 }
 
 impl Mapper {
-    pub fn new(
-        cfg: &DeviceConfig,
-        debounce_ms: u64,
-        long_press_ms: u64,
-        repeat_ms: u64,
-        log_buttons: bool,
-    ) -> Self {
+    pub fn new(cfg: &DeviceConfig, s: &crate::WorkerSettings) -> Self {
         Self {
             mappings: cfg.mappings.clone(),
             long_press_mappings: cfg.long_press_mappings.clone(),
@@ -51,10 +54,19 @@ impl Mapper {
             dpad_longpress_mappings: cfg.dpad_longpress_mappings.clone(),
             trigger_mappings: cfg.trigger_mappings.clone(),
             trigger_longpress_mappings: cfg.trigger_longpress_mappings.clone(),
-            debounce_ms,
-            long_press_ms,
-            repeat_ms,
-            log_buttons,
+            stick_left_mappings: cfg.stick_left_mappings.clone(),
+            stick_right_mappings: cfg.stick_right_mappings.clone(),
+            stick_deadzone: s.stick_deadzone,
+            stick_pushed: HashMap::new(),
+            gesture_mappings: cfg.gesture_mappings.clone(),
+            gesture_min_percent: s.gesture_min_percent,
+            gesture_tolerance: s.gesture_tolerance,
+            gesture_templates: s.gesture_templates.clone(),
+            stroke: crate::gesture::Stroke::default(),
+            debounce_ms: s.debounce_ms,
+            long_press_ms: s.long_press_ms,
+            repeat_ms: s.repeat_ms,
+            log_buttons: s.log_buttons,
             passthrough: cfg.passthrough,
             last_press: HashMap::new(),
             press_start: HashMap::new(),
@@ -313,6 +325,73 @@ impl Mapper {
     /// Brake (code 10): LT - value 0 (released) to 1023 (fully pressed)
     ///
     /// Handles controllers that send press-release-press cycles for auto-repeat.
+    pub fn handle_touch(&mut self, down: bool) {
+        if down {
+            self.stroke.press();
+            return;
+        }
+        let path = match self.stroke.release() {
+            Some(p) => p,
+            None => return,
+        };
+        if crate::gesture::travel(&path) < self.gesture_min_percent as f32 {
+            return;
+        }
+        let name = match crate::gesture::nearest(&path, &self.gesture_templates) {
+            Some((n, d)) if d <= self.gesture_tolerance => n.to_string(),
+            Some((n, d)) => {
+                info!("Gesture: no match (nearest '{}' at {:.2}, tolerance {:.2})", n, d, self.gesture_tolerance);
+                return;
+            }
+            None => {
+                info!("Gesture: no match (no gestures recorded)");
+                return;
+            }
+        };
+        let script = self.gesture_mappings.get(&name).cloned();
+        info!("Gesture '{}' -> {}", name, script.as_deref().unwrap_or("[unmapped]"));
+        if let Some(script) = script {
+            execute_script(&script);
+        }
+    }
+
+    pub fn handle_touch_move(&mut self, horizontal: bool, pct: i32) {
+        self.stroke.axis(horizontal, pct);
+    }
+
+    /// End of an input report. Contact position is sampled here.
+    pub fn handle_sync(&mut self) {
+        self.stroke.sync();
+    }
+
+    pub fn handle_stick(&mut self, axis: u16, pct: i32) {
+        let (mappings, stick, horizontal) = match axis {
+            0 | 1 => (&self.stick_left_mappings, "left", axis == 0),
+            3 | 4 => (&self.stick_right_mappings, "right", axis == 3),
+            _ => return,
+        };
+        if pct.abs() < self.stick_deadzone {
+            self.stick_pushed.insert(axis, false);
+            return;
+        }
+        let dir = match (horizontal, pct > 0) {
+            (true, false) => DpadDirection::Left,
+            (true, true) => DpadDirection::Right,
+            (false, false) => DpadDirection::Up,
+            (false, true) => DpadDirection::Down,
+        };
+        let script = mappings.get(&dir).cloned();
+        if self.stick_pushed.insert(axis, true) == Some(true) {
+            return;
+        }
+        if self.log_buttons {
+            info!("Stick {}: {:?} -> {}", stick, dir, script.as_deref().unwrap_or("[unmapped]"));
+        }
+        if let Some(script) = script {
+            execute_script(&script);
+        }
+    }
+
     pub fn handle_trigger(&mut self, axis: u16, value: i32) {
         let trigger = match axis {
             9 => Trigger::RT,   // Gas = Right Trigger
@@ -410,6 +489,12 @@ fn execute_script(script: &str) {
 
 #[cfg(test)]
 mod tests {
+    fn test_settings() -> crate::WorkerSettings {
+        let mut s = crate::WorkerSettings::from_config(&crate::config::Config::default());
+        s.debounce_ms = 0;
+        s
+    }
+
     use super::*;
     use crate::config::DeviceConfig;
 
@@ -419,7 +504,7 @@ mod tests {
         for code in mapped {
             cfg.mappings.insert(Key::new(*code), "/bin/true".into());
         }
-        Mapper::new(&cfg, 0, 500, 100, false)
+        Mapper::new(&cfg, &test_settings())
     }
 
     #[test]
@@ -439,11 +524,32 @@ mod tests {
     }
 
     #[test]
+    fn a_stick_fires_once_per_push_and_re_arms_at_centre() {
+        let mut m = Mapper::new(&DeviceConfig::for_test("dev"), &test_settings());
+
+        m.handle_stick(0, 10); // inside the deadzone, nothing to do
+        assert_eq!(m.stick_pushed.get(&0).copied(), Some(false));
+
+        m.handle_stick(0, 80); // pushed over
+        assert_eq!(m.stick_pushed.get(&0).copied(), Some(true));
+
+        m.handle_stick(0, 95); // held over, must not fire again
+        assert_eq!(m.stick_pushed.get(&0).copied(), Some(true));
+
+        m.handle_stick(0, 0); // back to centre, armed again
+        assert_eq!(m.stick_pushed.get(&0).copied(), Some(false));
+
+        m.handle_stick(1, -70);
+        assert_eq!(m.stick_pushed.get(&1).copied(), Some(true));
+        assert_eq!(m.stick_pushed.get(&0).copied(), Some(false));
+    }
+
+    #[test]
     fn a_long_press_mapping_also_claims_the_key() {
         let mut cfg = DeviceConfig::for_test("dev");
         cfg.passthrough = true;
         cfg.long_press_mappings.insert(Key::new(30), "/bin/true".into());
-        let m = Mapper::new(&cfg, 0, 500, 100, false);
+        let m = Mapper::new(&cfg, &test_settings());
         assert!(!m.relay(Key::new(30), 1));
     }
 }

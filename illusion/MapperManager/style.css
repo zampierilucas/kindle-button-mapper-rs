@@ -279,6 +279,16 @@ html, body {
 
 .binding-del:active { background: #000; color: #fff; }
 
+.binding-ren { margin-right: 10px; font-size: 26px; }
+
+/* detail-input floats right to sit beside a label; here it is the whole row. */
+#nameInput {
+    float: none;
+    width: 100%;
+    -webkit-box-sizing: border-box;
+    box-sizing: border-box;
+}
+
 .binding-empty {
     padding: 30px 0;
     text-align: center;
@@ -431,10 +441,21 @@ html, body {
 }
 
 .dialog-tall { top: 6%; height: 88%; overflow: hidden; padding-bottom: 110px; }
-.dialog-wide { left: 2%; width: 96%; padding-bottom: 28px; }
+.dialog-wide { left: 2%; width: 96%; }
+
+#logsActions {
+    position: absolute;
+    left: 28px;
+    right: 28px;
+    bottom: 28px;
+}
 
 .logs-content {
-    height: 940px;
+    position: absolute;
+    left: 28px;
+    right: 28px;
+    top: 100px;
+    bottom: 132px;
     overflow: auto;
     font-family: monospace;
     font-size: 22px;
@@ -444,7 +465,6 @@ html, body {
     text-align: left;
     border: 2px solid #000;
     padding: 12px;
-    margin-bottom: 16px;
     -webkit-box-sizing: border-box;
     box-sizing: border-box;
 }
@@ -547,7 +567,10 @@ html, body {
 
 .action-item:active .action-id { color: #ccc; }
 
-.add-options { margin-bottom: 14px; }
+.add-options { margin-bottom: 14px; overflow: hidden; }
+/* Two per row: the list outgrew the screen once sticks and swipes joined it,
+   and scrolling a dialog on eink is worse than a narrower button. */
+.add-options .add-opt { float: left; width: 48%; margin: 0 1% 10px; }
 
 /* ---- Raw config ---- */
 

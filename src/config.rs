@@ -40,6 +40,9 @@ pub struct DeviceConfig {
     pub dpad_longpress_mappings: HashMap<DpadDirection, String>,
     pub trigger_mappings: HashMap<Trigger, String>,
     pub trigger_longpress_mappings: HashMap<Trigger, String>,
+    pub stick_left_mappings: HashMap<DpadDirection, String>,
+    pub stick_right_mappings: HashMap<DpadDirection, String>,
+    pub gesture_mappings: HashMap<String, String>,
 }
 
 const KEY_SH: &str = "/mnt/us/kindle-button-mapper/scripts/key.sh";
@@ -79,6 +82,9 @@ impl DeviceConfig {
             && self.dpad_longpress_mappings.is_empty()
             && self.trigger_mappings.is_empty()
             && self.trigger_longpress_mappings.is_empty()
+            && self.stick_left_mappings.is_empty()
+            && self.stick_right_mappings.is_empty()
+            && self.gesture_mappings.is_empty()
     }
 
     #[cfg(test)]
@@ -101,6 +107,9 @@ impl DeviceConfig {
             dpad_longpress_mappings: HashMap::new(),
             trigger_mappings: HashMap::new(),
             trigger_longpress_mappings: HashMap::new(),
+            stick_left_mappings: HashMap::new(),
+            stick_right_mappings: HashMap::new(),
+            gesture_mappings: HashMap::new(),
         }
     }
 }
@@ -113,6 +122,10 @@ pub struct Config {
     pub repeat_ms: u64,
     pub log_buttons: bool,
     pub keep_awake: bool,
+    pub stick_deadzone: i32,
+    pub gesture_min_percent: i32,
+    pub gesture_tolerance: f32,
+    pub gesture_templates: Vec<(String, Vec<crate::gesture::Point>)>,
     pub on_connect: Option<String>,
     pub on_disconnect: Option<String>,
 }
@@ -126,6 +139,10 @@ impl Default for Config {
             repeat_ms: 100,
             log_buttons: false,
             keep_awake: true,
+            stick_deadzone: 50,
+            gesture_min_percent: 15,
+            gesture_tolerance: 0.30,
+            gesture_templates: Vec::new(),
             on_connect: None,
             on_disconnect: None,
         }
@@ -174,8 +191,22 @@ impl Config {
             if let Some(v) = get(s, "repeat_ms") { config.repeat_ms = v.parse().unwrap_or(config.repeat_ms); }
             if let Some(v) = get(s, "log_buttons") { config.log_buttons = parse_bool(v); }
             if let Some(v) = get(s, "keep_awake") { config.keep_awake = parse_bool(v); }
+            if let Some(v) = get(s, "stick_deadzone") { config.stick_deadzone = v.parse().unwrap_or(config.stick_deadzone); }
+            if let Some(v) = get(s, "gesture_min_percent") { config.gesture_min_percent = v.parse().unwrap_or(config.gesture_min_percent); }
+            if let Some(v) = get(s, "gesture_tolerance") { config.gesture_tolerance = v.parse().unwrap_or(config.gesture_tolerance); }
             config.on_connect = get(s, "on_connect").filter(|v| !v.is_empty()).map(String::from);
             config.on_disconnect = get(s, "on_disconnect").filter(|v| !v.is_empty()).map(String::from);
+        }
+
+        if let Some(sec) = map.get("gestures") {
+            for (name, points) in sec {
+                if let Some(points) = points {
+                    let parsed = crate::gesture::from_string(points);
+                    if !parsed.is_empty() {
+                        config.gesture_templates.push((name.clone(), parsed));
+                    }
+                }
+            }
         }
 
         // First pass: collect device IDs from [device.NAME] sections, ordered by appearance.
@@ -234,6 +265,15 @@ impl Config {
                 Some("triggers") => fill_trigger_map(entries, &mut dev.trigger_mappings),
                 Some("triggers_longpress") => {
                     fill_trigger_map(entries, &mut dev.trigger_longpress_mappings)
+                }
+                Some("stick_left") => fill_dpad_map(entries, &mut dev.stick_left_mappings),
+                Some("stick_right") => fill_dpad_map(entries, &mut dev.stick_right_mappings),
+                Some("gestures") => {
+                    for (k, v) in entries {
+                        if let Some(v) = v {
+                            dev.gesture_mappings.insert(k.clone(), v.clone());
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -397,5 +437,36 @@ mod tests {
         assert!(!dev.is_unmapped());
         assert!(dev.dpad_mappings.is_empty());
         assert_eq!(dev.mappings[&Key::new(304)], "/mnt/us/mine.sh");
+    }
+}
+
+#[cfg(test)]
+mod gesture_config_tests {
+    use super::*;
+
+    #[test]
+    fn a_gesture_survives_a_round_trip_through_the_ini_parser() {
+        let pts: Vec<crate::gesture::Point> =
+            (0..32).map(|i| (i as f32 / 31.0, 0.5)).collect();
+        // A name the user typed, not a generated one.
+        let body = format!(
+            "[settings]\nlog_buttons = true\n\n[gestures]\nPage Next = {}\n\n\
+             [device.pad]\nname = Pad\nuniq = AA:BB\n\n\
+             [device.pad.gestures]\nPage Next = /bin/true\n",
+            crate::gesture::to_string(&pts)
+        );
+        let path = std::env::temp_dir().join("kbm_gesture_roundtrip.ini");
+        std::fs::write(&path, body).unwrap();
+
+        let cfg = Config::load(&path).expect("config loads");
+        let (name, loaded) = cfg.gesture_templates.first().expect("template present");
+        assert_eq!(loaded.len(), pts.len(), "every point must survive the parser");
+        assert!(crate::gesture::distance(loaded, &pts) < 0.01);
+
+        // Whatever the parser does to the spelling, both halves must agree or
+        // the binding never fires.
+        let dev = cfg.devices.iter().find(|d| d.id == "pad").unwrap();
+        assert!(dev.gesture_mappings.contains_key(name), "template {:?} has no binding", name);
+        let _ = std::fs::remove_file(&path);
     }
 }

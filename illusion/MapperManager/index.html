@@ -125,9 +125,21 @@
         <div class="dialog dialog-tall dialog-wide">
             <p>Logs</p>
             <pre id="logsContent" class="logs-content"></pre>
-            <div class="actions-row">
+            <div id="logsActions" class="actions-row">
                 <button id="btnLogsRefresh" class="btn btn-half">Refresh</button>
                 <button id="btnLogsClose" class="btn btn-half">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Name overlay -->
+    <div id="nameOverlay" class="overlay">
+        <div class="dialog">
+            <p id="nameTitle">Name this gesture</p>
+            <input id="nameInput" class="detail-input" type="text" />
+            <div class="actions-row">
+                <button id="btnNameOk" class="btn btn-half">OK</button>
+                <button id="btnNameCancel" class="btn btn-half">Cancel</button>
             </div>
         </div>
     </div>
@@ -185,13 +197,15 @@
         <div class="dialog">
             <p>Add a mapping</p>
             <div class="add-options">
-                <button class="btn add-opt" data-slot-kind="button">Capture button</button>
+                <button class="btn add-opt" data-slot-kind="button">Capture btn</button>
                 <button class="btn add-opt" data-slot-kind="dpad-up">D-pad Up</button>
                 <button class="btn add-opt" data-slot-kind="dpad-down">D-pad Down</button>
                 <button class="btn add-opt" data-slot-kind="dpad-left">D-pad Left</button>
                 <button class="btn add-opt" data-slot-kind="dpad-right">D-pad Right</button>
                 <button class="btn add-opt" data-slot-kind="trigger-lt">Trigger LT</button>
                 <button class="btn add-opt" data-slot-kind="trigger-rt">Trigger RT</button>
+                <button class="btn add-opt" data-slot-kind="stick">Capture stick</button>
+                <button class="btn add-opt" data-slot-kind="gesture">Record gesture</button>
             </div>
             <div class="dialog-buttons">
                 <button id="btnAddCancel" class="btn">Cancel</button>
