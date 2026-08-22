@@ -276,7 +276,7 @@ impl Pager {
                 }
             }
             None => {
-                info!("No page buttons found, page turns go to the virtual keyboard");
+                info!("No page buttons found, page turns go to the window in front");
                 Pager::VirtualKeyboard
             }
         }
@@ -315,16 +315,22 @@ impl Pager {
                     *node = None;
                 }
             }
-            Pager::VirtualKeyboard => match vkbd {
-                Some(vkbd) => {
-                    let kbd_code = if forward { KEY_DOWN } else { KEY_UP };
-                    if let Err(e) = tap(vkbd, kbd_code) {
-                        warn!("Page turn failed: {}", e);
-                    }
+            Pager::VirtualKeyboard => {
+                let page_code = if forward { KEY_PAGEDOWN } else { KEY_PAGEUP };
+                if crate::xkey::send_page(page_code) {
+                    return;
                 }
-                // serve() does not open the FIFO in this case.
-                None => warn!("Page turn failed, no uinput keyboard"),
-            },
+                match vkbd {
+                    Some(vkbd) => {
+                        let kbd_code = if forward { KEY_DOWN } else { KEY_UP };
+                        if let Err(e) = tap(vkbd, kbd_code) {
+                            warn!("Page turn failed: {}", e);
+                        }
+                    }
+                    // serve() does not open the FIFO in this case.
+                    None => warn!("Page turn failed, no uinput keyboard"),
+                }
+            }
         }
     }
 }
