@@ -33,7 +33,8 @@ pub struct DeviceConfig {
     /// Re-emit keys with no mapping through the virtual keyboard. Only means
     /// anything alongside a grab, and it is what makes a keyboard survive one.
     pub passthrough: bool,
-    /// Hold the mouse and relay what is not mapped, instead of sharing it.
+    /// Map this mouse's buttons. Everything unmapped is relayed, so the rest
+    /// of the mouse keeps working.
     pub mouse: bool,
     pub keyboard_layout: Option<String>,
     pub mappings: HashMap<Key, String>,

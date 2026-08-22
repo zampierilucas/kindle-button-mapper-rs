@@ -203,7 +203,7 @@ var MapperManager = (function() {
     function hideOverlay(id) { getEl(id).className = "overlay"; }
 
     function showInfo(text) {
-        getEl("infoMessage").innerHTML = escapeHtml(text);
+        getEl("infoMessage").innerHTML = escapeHtml(text).replace(/\n/g, "<br/>");
         showOverlay("infoOverlay");
     }
 
@@ -1241,7 +1241,7 @@ var MapperManager = (function() {
         }, false);
         getEl("devDetailMouse").addEventListener("click", toggleDeviceDetailMouse, false);
         getEl("devDetailMouseInfo").addEventListener("click", function() {
-            showInfo("Mouse: map this device's buttons instead of letting them click. The mapper takes the mouse exclusively, so a mapped button no longer also taps the screen, and re-emits the movement, the wheel and every button you left unmapped, so it still works as a mouse.");
+            showInfo("Buttons you map run their action instead of clicking.\nThe pointer, wheel and unmapped buttons keep working as a normal mouse.\nTurns on Exclusive, the mapper needs to own the device.");
         }, false);
         getEl("devDetailLayoutInfo").addEventListener("click", function() {
             showInfo("Keyboard layout: pick an XKB layout re-applied every time this keyboard connects, so a non-US layout survives reconnects. Choose (system default) to leave the layout untouched.");
