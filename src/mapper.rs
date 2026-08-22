@@ -45,6 +45,10 @@ pub struct Mapper {
     trigger_longpress_fired: HashMap<Trigger, bool>,
 }
 
+fn is_mouse_button(key: Key) -> bool {
+    (Key::BTN_LEFT.code()..=Key::BTN_TASK.code()).contains(&key.code())
+}
+
 impl Mapper {
     pub fn new(cfg: &DeviceConfig, s: &crate::WorkerSettings) -> Self {
         Self {
@@ -67,7 +71,7 @@ impl Mapper {
             long_press_ms: s.long_press_ms,
             repeat_ms: s.repeat_ms,
             log_buttons: s.log_buttons,
-            passthrough: cfg.passthrough,
+            passthrough: cfg.passthrough || cfg.mouse,
             last_press: HashMap::new(),
             press_start: HashMap::new(),
             long_press_fired: HashMap::new(),
@@ -98,8 +102,13 @@ impl Mapper {
         if !self.passthrough || self.claims(key) {
             return false;
         }
-        if !vkeyboard::forward(key.code(), value) {
-            debug!("Passthrough dropped {:?}, no virtual keyboard", key);
+        let relayed = if is_mouse_button(key) {
+            vkeyboard::pointer_button(key.code(), value)
+        } else {
+            vkeyboard::forward(key.code(), value)
+        };
+        if !relayed {
+            debug!("Passthrough dropped {:?}, no virtual device to relay into", key);
         }
         true
     }

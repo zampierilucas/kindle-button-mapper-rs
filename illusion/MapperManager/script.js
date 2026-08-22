@@ -203,7 +203,7 @@ var MapperManager = (function() {
     function hideOverlay(id) { getEl(id).className = "overlay"; }
 
     function showInfo(text) {
-        getEl("infoMessage").innerHTML = escapeHtml(text);
+        getEl("infoMessage").innerHTML = escapeHtml(text).replace(/\n/g, "<br/>");
         showOverlay("infoOverlay");
     }
 
@@ -993,6 +993,7 @@ var MapperManager = (function() {
         getEl("devDetailName").value = prefillName || "";
         getEl("devDetailUniq").value = prefillUniq || "";
         getEl("devDetailGrab").className = "toggle";
+        getEl("devDetailMouse").className = "toggle";
         setDeviceLayout("");
         getEl("btnDeviceDelete").style.display = "none";
         updateDeviceIdView();
@@ -1006,6 +1007,8 @@ var MapperManager = (function() {
         getEl("devDetailUniq").value = getValue("device." + id, "uniq") || "";
         var grab = (getValue("device." + id, "grab") || "").toLowerCase() === "true";
         getEl("devDetailGrab").className = "toggle" + (grab ? " on" : "");
+        var mouse = (getValue("device." + id, "type") || "").toLowerCase() === "mouse";
+        getEl("devDetailMouse").className = "toggle" + (mouse ? " on" : "");
         setDeviceLayout(getValue("device." + id, "keyboard_layout") || "");
         getEl("btnDeviceDelete").style.display = "block";
         getEl("devDetailIdView").innerHTML = escapeHtml(id);
@@ -1025,6 +1028,13 @@ var MapperManager = (function() {
         t.className = t.className.indexOf(" on") >= 0 ? "toggle" : "toggle on";
     }
 
+    function toggleDeviceDetailMouse() {
+        var t = getEl("devDetailMouse");
+        var on = t.className.indexOf(" on") < 0;
+        t.className = on ? "toggle on" : "toggle";
+        if (on) { getEl("devDetailGrab").className = "toggle on"; }
+    }
+
     function autoIdFromName(s) {
         return s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").substring(0, 30) || "device";
     }
@@ -1042,6 +1052,7 @@ var MapperManager = (function() {
             return;
         }
         var exclusive = getEl("devDetailGrab").className.indexOf(" on") >= 0;
+        var mouse = getEl("devDetailMouse").className.indexOf(" on") >= 0;
 
         if (!editingDeviceId && listDeviceIds().indexOf(newId) >= 0) {
             showMessage("A device with that name already exists", true);
@@ -1056,6 +1067,7 @@ var MapperManager = (function() {
         setValue(section, "name", name);
         setOrDel(section, "grab", pinned ? String(exclusive) : "");
         setOrDel(section, "uniq", uniq);
+        setOrDel(section, "type", mouse ? "mouse" : "");
         setOrDel(section, "keyboard_layout", layout);
         delValue(section, "path");
 
@@ -1226,6 +1238,10 @@ var MapperManager = (function() {
         }, false);
         getEl("devDetailGrabInfo").addEventListener("click", function() {
             showInfo("Exclusive: take sole ownership of the input device so other apps (e.g. the Kindle reader) don't also react to its events. Recommended for gamepads and remotes when you only want the mapper to handle them.");
+        }, false);
+        getEl("devDetailMouse").addEventListener("click", toggleDeviceDetailMouse, false);
+        getEl("devDetailMouseInfo").addEventListener("click", function() {
+            showInfo("Buttons you map run their action instead of clicking.\nThe pointer, wheel and unmapped buttons keep working as a normal mouse.\nTurns on Exclusive, the mapper needs to own the device.");
         }, false);
         getEl("devDetailLayoutInfo").addEventListener("click", function() {
             showInfo("Keyboard layout: pick an XKB layout re-applied every time this keyboard connects, so a non-US layout survives reconnects. Choose (system default) to leave the layout untouched.");

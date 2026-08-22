@@ -34,6 +34,7 @@ const SYN_REPORT: u16 = 0x00;
 ioctl_none!(ui_dev_create, b'U', 1);
 ioctl_write_int!(ui_set_evbit, b'U', 100);
 ioctl_write_int!(ui_set_keybit, b'U', 101);
+ioctl_write_int!(ui_set_relbit, b'U', 102);
 ioctl_read_buf!(ui_get_sysname, b'U', 44, u8);
 
 // Kernel layout: the timestamp is a pair of kernel longs, not libc time_t —
@@ -390,6 +391,132 @@ fn write_event(dev: &mut File, kind: u16, code: u16, value: i32) -> io::Result<(
         )
     };
     dev.write_all(bytes)
+}
+
+// ---- virtual pointer ----
+//
+// Where a held mouse's unmapped events go, so the grab does not take the cursor
+// with it. Created on demand, a Kindle with no mouse should not grow one.
+
+const POINTER_NAME: &[u8] = b"kindle-button-mapper-pointer";
+const EV_REL: u16 = 0x02;
+/// REL_X, REL_Y, REL_HWHEEL, REL_WHEEL. Anything else is dropped.
+const REL_AXES: [u16; 4] = [0, 1, 6, 8];
+const BTN_LEFT: u16 = 0x110;
+const BTN_TASK: u16 = 0x117;
+
+struct Pointer {
+    dev: Option<File>,
+    pending: bool,
+}
+
+static POINTER: OnceLock<Mutex<Pointer>> = OnceLock::new();
+
+fn pointer() -> &'static Mutex<Pointer> {
+    POINTER.get_or_init(|| {
+        let dev = match ensure_uinput_node().map_err(io::Error::other).and_then(|()| create_pointer()) {
+            Ok(f) => {
+                match dev_node(&f) {
+                    Ok(path) => info!("Virtual pointer at {}", path.display()),
+                    Err(e) => warn!("Cannot resolve virtual pointer node: {}", e),
+                }
+                Some(f)
+            }
+            Err(e) => {
+                warn!("uinput pointer create failed: {} — a held mouse will not move the cursor", e);
+                None
+            }
+        };
+        Mutex::new(Pointer { dev, pending: false })
+    })
+}
+
+/// Creates the pointer on the first call.
+pub fn pointer_ready() -> bool {
+    pointer().lock().unwrap_or_else(|p| p.into_inner()).dev.is_some()
+}
+
+/// Nothing moves until `pointer_sync`.
+pub fn pointer_motion(code: u16, value: i32) -> bool {
+    REL_AXES.contains(&code) && pointer_write(EV_REL, code, value)
+}
+
+pub fn pointer_button(code: u16, value: i32) -> bool {
+    (BTN_LEFT..=BTN_TASK).contains(&code) && pointer_write(EV_KEY, code, value)
+}
+
+/// Mirrors the source device's SYN_REPORT, so a batch of motion lands as one
+/// move. A no-op when nothing was relayed.
+pub fn pointer_sync() {
+    let mut p = pointer().lock().unwrap_or_else(|p| p.into_inner());
+    if !p.pending {
+        return;
+    }
+    p.pending = false;
+    if let Some(ref mut dev) = p.dev {
+        if let Err(e) = write_event(dev, EV_SYN, SYN_REPORT, 0) {
+            warn!("Pointer sync failed: {}", e);
+        }
+    }
+}
+
+fn pointer_write(kind: u16, code: u16, value: i32) -> bool {
+    let mut p = pointer().lock().unwrap_or_else(|p| p.into_inner());
+    let written = match p.dev {
+        Some(ref mut dev) => match write_event(dev, kind, code, value) {
+            Ok(()) => true,
+            Err(e) => {
+                warn!("Pointer relay of {:#x} failed: {}", code, e);
+                false
+            }
+        },
+        None => false,
+    };
+    if written {
+        p.pending = true;
+    }
+    written
+}
+
+fn create_pointer() -> io::Result<File> {
+    let file = OpenOptions::new().read(true).write(true).open(UINPUT_DEV)?;
+    let fd = file.as_raw_fd();
+
+    unsafe { ui_set_evbit(fd, EV_KEY as u32 as _) }?;
+    for code in BTN_LEFT..=BTN_TASK {
+        unsafe { ui_set_keybit(fd, code as _) }?;
+    }
+    unsafe { ui_set_evbit(fd, EV_REL as u32 as _) }?;
+    for code in REL_AXES {
+        unsafe { ui_set_relbit(fd, code as _) }?;
+    }
+
+    let mut setup = UinputUserDev {
+        name: [0; UINPUT_MAX_NAME_SIZE],
+        id: InputId {
+            bustype: 0x03, // BUS_USB
+            vendor: 0x1234,
+            product: 0x5679,
+            version: 0x111,
+        },
+        ff_effects_max: 0,
+        absmax: [0; ABS_CNT],
+        absmin: [0; ABS_CNT],
+        absfuzz: [0; ABS_CNT],
+        absflat: [0; ABS_CNT],
+    };
+    setup.name[..POINTER_NAME.len()].copy_from_slice(POINTER_NAME);
+
+    let bytes = unsafe {
+        std::slice::from_raw_parts(
+            (&setup as *const UinputUserDev).cast::<u8>(),
+            mem::size_of::<UinputUserDev>(),
+        )
+    };
+    (&file).write_all(bytes)?;
+
+    unsafe { ui_dev_create(fd) }?;
+    Ok(file)
 }
 
 fn create_device() -> io::Result<File> {

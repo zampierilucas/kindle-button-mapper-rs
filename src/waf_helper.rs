@@ -281,10 +281,10 @@ fn devices_json() -> String {
                 .map(|d| {
                     let n = d.name().unwrap_or("").to_string();
                     let u = d.unique_name().unwrap_or("").to_string();
-                    (n, u, crate::input::mappable_keys(d.supported_keys()))
+                    (n, u, crate::input::mappable_keys(d.supported_keys(), false))
                 })
                 .unwrap_or_default();
-            if dev_name == "kindle-button-mapper" {
+            if dev_name.starts_with("kindle-button-mapper") {
                 continue;
             }
             entries.push((path.display().to_string(), dev_name, dev_uniq, keys));

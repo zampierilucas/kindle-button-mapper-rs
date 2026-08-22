@@ -22,10 +22,10 @@ pub fn uniq_matches(node: &str, want: &str) -> bool {
     !want.is_empty() && bare_addr(node) == bare_addr(want)
 }
 
-pub fn mappable_keys(keys: Option<&AttributeSetRef<Key>>) -> usize {
+pub fn mappable_keys(keys: Option<&AttributeSetRef<Key>>, mouse: bool) -> usize {
     let mouse_buttons = Key::BTN_LEFT.code()..=Key::BTN_TASK.code();
     keys.map_or(0, |keys| {
-        keys.iter().filter(|k| !mouse_buttons.contains(&k.code())).count()
+        keys.iter().filter(|k| mouse_buttons.contains(&k.code()) == mouse).count()
     })
 }
 
@@ -33,6 +33,7 @@ pub struct InputHandler {
     device_name: Option<String>,
     device_uniq: Option<String>,
     grab: bool,
+    mouse: bool,
 }
 
 impl InputHandler {
@@ -40,11 +41,13 @@ impl InputHandler {
         device_name: Option<String>,
         device_uniq: Option<String>,
         grab: bool,
+        mouse: bool,
     ) -> Self {
         Self {
             device_name,
             device_uniq,
             grab,
+            mouse,
         }
     }
 
@@ -65,7 +68,7 @@ impl InputHandler {
     }
 
     fn matches_device(&self, dev: &Device) -> bool {
-        if dev.name().unwrap_or("") == "kindle-button-mapper" {
+        if dev.name().unwrap_or("").starts_with("kindle-button-mapper") {
             return false;
         }
         // uniq (MAC) is stable across renames and reconnects — match on it
@@ -104,7 +107,7 @@ impl InputHandler {
                     if !self.matches_device(&dev) {
                         continue;
                     }
-                    let keys = mappable_keys(dev.supported_keys());
+                    let keys = mappable_keys(dev.supported_keys(), self.mouse);
                     debug!("{} matches, {} mappable keys", path.display(), keys);
                     if best.as_ref().is_none_or(|(most, _, _)| keys > *most) {
                         best = Some((keys, path, dev));
@@ -165,8 +168,8 @@ impl InputHandler {
     /// grab is not fatal, but the caller has to know: whoever holds it still
     /// gets the events, so anything that assumes exclusivity would double up.
     fn finish_open(&self, mut device: Device) -> Result<(Device, bool), String> {
-        if device.name().unwrap_or("") == "kindle-button-mapper" {
-            return Err("Refusing to read our own virtual keyboard".to_string());
+        if device.name().unwrap_or("").starts_with("kindle-button-mapper") {
+            return Err("Refusing to read our own virtual device".to_string());
         }
         let mut grabbed = false;
         if self.grab {
@@ -198,10 +201,19 @@ mod tests {
         let keyboard = AttributeSet::from_iter([Key::KEY_A, Key::KEY_PAGEUP, Key::KEY_PAGEDOWN]);
         let gamepad = AttributeSet::from_iter([Key::BTN_SOUTH, Key::BTN_EAST]);
 
-        assert_eq!(mappable_keys(Some(&mouse)), 0);
-        assert_eq!(mappable_keys(Some(&keyboard)), 3);
-        assert_eq!(mappable_keys(Some(&gamepad)), 2);
-        assert_eq!(mappable_keys(None), 0);
+        assert_eq!(mappable_keys(Some(&mouse), false), 0);
+        assert_eq!(mappable_keys(Some(&keyboard), false), 3);
+        assert_eq!(mappable_keys(Some(&gamepad), false), 2);
+        assert_eq!(mappable_keys(None, false), 0);
+    }
+
+    #[test]
+    fn a_mouse_device_picks_the_node_with_the_buttons() {
+        let buttons = AttributeSet::from_iter([Key::BTN_LEFT, Key::BTN_RIGHT, Key::BTN_MIDDLE]);
+        let consumer = AttributeSet::from_iter([Key::KEY_PLAYPAUSE, Key::KEY_VOLUMEUP]);
+
+        assert!(mappable_keys(Some(&buttons), true) > mappable_keys(Some(&consumer), true));
+        assert!(mappable_keys(Some(&buttons), false) < mappable_keys(Some(&consumer), false));
     }
 
     #[test]
