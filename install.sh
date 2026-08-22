@@ -7,6 +7,9 @@
 
 set -e
 
+trap '/usr/sbin/mntroot ro 2>/dev/null' EXIT
+trap 'exit 130' INT TERM HUP
+
 SRC_DIR=$(cd "$(dirname "$0")" && pwd)
 INSTALL_DIR=/mnt/us/kindle-button-mapper
 
