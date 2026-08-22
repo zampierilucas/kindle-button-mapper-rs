@@ -16,11 +16,14 @@ Y_PCT="${2:-50}"
 FB_MODES="/sys/class/graphics/fb0/modes"
 DEVICES="/proc/bus/input/devices"
 
-# The touchscreen is the direct-input device with absolute axes. A gamepad has
-# axes too, but reports no INPUT_PROP_DIRECT.
+# The touchscreen is a direct-input device with absolute axes. A gamepad has
+# axes too, but reports no INPUT_PROP_DIRECT. Kindle Scribe models expose the
+# Wacom pen digitizer as another direct absolute device before the finger
+# touchscreen, so explicitly skip pen/stylus devices.
 touch_node() {
     awk '
-        /^$/ { prop=""; abs=""; handler="" }
+        /^$/ { name=""; prop=""; abs=""; handler="" }
+        /^N: Name=/ { name=tolower($0) }
         /^B: PROP=/ { prop=$2; sub(/PROP=/, "", prop) }
         /^B: ABS=/  { abs=$2 }
         /^H: Handlers=/ {
@@ -31,7 +34,9 @@ touch_node() {
             }
         }
         {
-            if (handler != "" && abs != "" && prop ~ /[23671abefABEF]$/) {
+            if (handler != "" && abs != "" &&
+                    prop ~ /[23671abefABEF]$/ &&
+                    name !~ /(wacom|stylus|pen)/) {
                 print "/dev/input/" handler
                 exit
             }
