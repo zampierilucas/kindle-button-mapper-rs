@@ -75,6 +75,7 @@ uniq = AA:BB:CC:DD:EE:FF   # Bluetooth MAC; matched first when set
 grab = true
 # type = mouse             # mapped buttons act instead of clicking
 # keyboard_layout = fr     # XKB layout override (comma list for an Alt+Shift toggle, e.g. us,ru)
+# passthrough = true       # required for keyboard_layout to reach KOReader
 
 [device.gamepad.buttons]
 # button_code = /path/to/script.sh
@@ -100,6 +101,28 @@ unstable across reconnects): the mapper uses the Bluetooth MAC (`uniq`) when set
 otherwise the device `name`. Set at least one.
 
 Set `keyboard_layout` to an XKB layout code (e.g. `fr`, `de`, `ro`, `fr(oss)`) to type correctly on a non-US Bluetooth keyboard. The reader re-pins the `us` core keymap on every focus and `/usr/share/X11/xkb` is read-only, so the mapper bind-mounts a generated `us` symbols file over the system one; every re-pin then resolves to your layout, reverted when the daemon stops. Give a comma list for an Alt+Shift toggle (`us,ru`); it's a system-wide override taken from the first device that sets one. Leave it unset to keep the system default.
+
+That covers everything drawn by X, which is the native reader, kterm and anything
+launched under it. KOReader is not an X client: it opens the keyboard's event node
+itself and maps it through a hardcoded US table, so the bind-mount cannot reach it.
+The mapper closes that gap separately, by sending the character KOReader should have
+typed over its HTTP Inspector. The layout comes from the same place X gets it, by
+asking `xkbcomp` to resolve the running keymap, so a language needs no data of its
+own. Two things have to be set.
+
+- `grab = true` and `passthrough = true` on the device, so the mapper holds the
+  keyboard and KOReader reads only what the mapper relays.
+- KOReader's **HTTP Inspector** plugin enabled, the same one the `koreader:` actions
+  already use.
+
+Letters, digits, space and the editing keys relay as keycodes exactly as before,
+since KOReader types those correctly on its own and its shortcuts depend on them.
+Accented characters, punctuation, the AltGr levels and dead keys are sent as text.
+When KOReader is not running nothing is sent and the XKB override serves X as usual.
+
+Dead keys cover the thirteen accents in `scripts/gen-keysym.py`, which is enough for
+the Latin layouts. Stacking two accents on one letter is not supported, and neither
+are the group toggles from a comma list, since KOReader has nothing to toggle with.
 
 Set `type = mouse` to map a mouse's buttons. Mapped buttons run their action
 instead of clicking; the pointer, wheel and unmapped buttons keep working as a

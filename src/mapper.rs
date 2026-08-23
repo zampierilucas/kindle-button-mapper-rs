@@ -1,5 +1,6 @@
 use crate::action;
 use crate::config::{DeviceConfig, DpadDirection, Trigger};
+use crate::kolayout::KoLayout;
 use crate::vkeyboard;
 use evdev::Key;
 use log::{debug, info};
@@ -27,6 +28,7 @@ pub struct Mapper {
     repeat_ms: u64,
     log_buttons: bool,
     passthrough: bool,
+    kolayout: Option<KoLayout>,
     last_press: HashMap<Key, Instant>,
     press_start: HashMap<Key, Instant>,
     long_press_fired: HashMap<Key, bool>,
@@ -72,6 +74,7 @@ impl Mapper {
             repeat_ms: s.repeat_ms,
             log_buttons: s.log_buttons,
             passthrough: cfg.passthrough || cfg.mouse,
+            kolayout: cfg.keyboard_layout.as_deref().and_then(KoLayout::load),
             last_press: HashMap::new(),
             press_start: HashMap::new(),
             long_press_fired: HashMap::new(),
@@ -98,9 +101,17 @@ impl Mapper {
     /// Relay a key the mapper grabbed but does not want. Debounce and the
     /// press bookkeeping are for firing actions, a relayed keystroke is
     /// passed on exactly as it arrived.
-    fn relay(&self, key: Key, value: i32) -> bool {
+    fn relay(&mut self, key: Key, value: i32) -> bool {
         if !self.passthrough || self.claims(key) {
             return false;
+        }
+        // KOReader maps this node through a hardcoded US table, so anything the
+        // layout renames goes to it as text instead of as a keycode. Declines
+        // whenever KOReader is down, leaving X to the XKB override.
+        if let Some(layout) = self.kolayout.as_mut() {
+            if layout.consume(key.code(), value) {
+                return true;
+            }
         }
         let relayed = if is_mouse_button(key) {
             vkeyboard::pointer_button(key.code(), value)
@@ -518,7 +529,7 @@ mod tests {
 
     #[test]
     fn passthrough_relays_only_what_is_not_mapped() {
-        let m = mapper(true, &[30]);
+        let mut m = mapper(true, &[30]);
         // Mapped, so the mapper runs the action rather than relaying the key.
         assert!(!m.relay(Key::new(30), 1));
         // Not mapped, so it has to keep typing.
@@ -527,7 +538,7 @@ mod tests {
 
     #[test]
     fn without_passthrough_nothing_is_relayed() {
-        let m = mapper(false, &[30]);
+        let mut m = mapper(false, &[30]);
         assert!(!m.relay(Key::new(30), 1));
         assert!(!m.relay(Key::new(31), 1));
     }
@@ -558,7 +569,7 @@ mod tests {
         let mut cfg = DeviceConfig::for_test("dev");
         cfg.passthrough = true;
         cfg.long_press_mappings.insert(Key::new(30), "/bin/true".into());
-        let m = Mapper::new(&cfg, &test_settings());
+        let mut m = Mapper::new(&cfg, &test_settings());
         assert!(!m.relay(Key::new(30), 1));
     }
 }
