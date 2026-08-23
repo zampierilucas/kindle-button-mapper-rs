@@ -1,6 +1,8 @@
 mod action;
 mod config;
 mod input;
+mod kolayout;
+mod keysym;
 mod koreader;
 mod layout;
 mod mapper;
