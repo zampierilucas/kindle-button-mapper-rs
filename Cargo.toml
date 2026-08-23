@@ -10,7 +10,7 @@ evdev = "0.12"
 configparser = "3"
 nix = { version = "0.29", features = ["inotify", "signal", "poll", "ioctl", "fs"] }
 log = "0.4"
-env_logger = "0.11"
+env_logger = { version = "0.11", default-features = false, features = ["humantime"] }
 
 [profile.release]
 lto = true
