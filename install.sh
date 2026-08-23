@@ -43,7 +43,8 @@ else
     cp "$BIN" "$INSTALL_DIR/kindle-button-mapper"
 fi
 if [ "$SAME_DIR" != 1 ]; then
-    cp "$SRC_DIR/assets/kindle-button-mapper.upstart" "$INSTALL_DIR/assets/"
+    cp "$SRC_DIR/assets/kindle-button-mapper.upstart" \
+       "$SRC_DIR/assets/99-kindle-button-mapper-pointer.rules" "$INSTALL_DIR/assets/"
     cp "$SRC_DIR/uninstall.sh" "$INSTALL_DIR/"
     [ -f "$INSTALL_DIR/config.ini" ] || cp "$SRC_DIR/config.ini" "$INSTALL_DIR/"
     cp "$SRC_DIR/scripts/"*.sh "$INSTALL_DIR/scripts/"
