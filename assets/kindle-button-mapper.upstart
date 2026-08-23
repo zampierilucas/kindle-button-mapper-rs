@@ -1,6 +1,6 @@
 # Kindle Button Mapper - maps hardware buttons to custom actions
 # For use with the pre-built binary from releases
-start on started wmt
+start on mounted_userstore or user_store_available
 stop on stopping filesystems
 
 respawn
