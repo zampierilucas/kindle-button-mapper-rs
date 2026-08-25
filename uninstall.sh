@@ -36,6 +36,7 @@ fi
 /usr/sbin/mntroot ro || true
 
 rm -rf "$INSTALL_DIR"
+rm -rf "/var/local/mesquite/$APP_ID" /var/local/mesquite/MapperManager
 rm -f /mnt/us/documents/MapperManager.sh
 
 echo "Uninstalled."
