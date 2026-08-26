@@ -189,6 +189,17 @@ Everything else goes over `lipc`.
 
 `keep_awake = true` (default) resets the screensaver timer on input so the device stays awake while a controller is connected, without blocking the power button.
 
+## Install with KPM
+
+If you have [KPM](https://kindlemodding.org/kindle-dev/kpm/) installed, add this repository once and install:
+
+```bash
+kpm add-repo https://raw.githubusercontent.com/zampierilucas/kindle-button-mapper-rs/master/kpm/repo.json
+kpm install kindle-button-mapper
+```
+
+`kpm upgrade` picks up later releases and keeps your `config.ini`. `kpm uninstall kindle-button-mapper` removes the binary, the upstart job, the udev rule and the MapperManager app.
+
 ## Install from release
 
 Grab the latest `kindle-button-mapper-armv7.tar.gz` from the [releases page](https://github.com/zampierilucas/kindle-button-mapper-rs/releases), copy it to the Kindle, extract, and run the installer:

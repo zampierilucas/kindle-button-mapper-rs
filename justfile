@@ -41,6 +41,10 @@ test:
 clean:
     cargo clean
 
+# Restamp kpm/repo.json from Cargo.toml and derive kpm/manifest.json
+kpm-manifests:
+    sh kpm/gen-manifests.sh
+
 # Deploy to Kindle
 deploy: build-kindle
     @echo "Deploying to Kindle..."
