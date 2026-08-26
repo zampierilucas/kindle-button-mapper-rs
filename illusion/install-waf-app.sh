@@ -27,10 +27,13 @@ fi
 
 echo "1. App files at $APP_DIR"
 
-echo "2. Setting scriptlet permissions"
+echo "2. Clearing cached app assets"
+rm -rf "/var/local/mesquite/$APP_ID" /var/local/mesquite/MapperManager 2>/dev/null
+
+echo "3. Setting scriptlet permissions"
 chmod +x "$SCRIPTLET" 2>/dev/null
 
-echo "3. Registering app"
+echo "4. Registering app"
 if [ -f "$APPREG_DB" ]; then
     existing=$(sqlite3 "$APPREG_DB" "SELECT handlerId FROM handlerIds WHERE handlerId='$APP_ID';" 2>/dev/null)
     if [ -z "$existing" ]; then
@@ -54,7 +57,7 @@ else
     echo "   WARNING: appreg.db not found at $APPREG_DB"
 fi
 
-echo "4. Installing scriptlet"
+echo "5. Installing scriptlet"
 cp "$SCRIPTLET" "$SCRIPTLET_DEST"
 chmod +x "$SCRIPTLET_DEST"
 echo "   Installed at $SCRIPTLET_DEST"
