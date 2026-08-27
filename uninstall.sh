@@ -1,6 +1,10 @@
 #!/bin/sh
 set -e
 
+if [ "$1" = upgrade ]; then
+    exit 0
+fi
+
 trap '/usr/sbin/mntroot ro 2>/dev/null' EXIT
 trap 'exit 130' INT TERM HUP
 

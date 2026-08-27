@@ -1,0 +1,28 @@
+{
+  "manifest_version": 1,
+  "id": "kindle-button-mapper",
+  "name": "Kindle Button Mapper",
+  "description": "Releases of Kindle Button Mapper, an input remapper for Kindle e-readers.",
+  "packages": {
+    "kindle-button-mapper": {
+      "name": "Kindle Button Mapper",
+      "author": "Lucas Zampieri",
+      "description": "Maps input events from keyboards, gamepads and remotes to page turns, taps, key injection and shell scripts, with a touchscreen manager app to edit the bindings on device.",
+      "artifacts": [
+        {
+          "url": "https://github.com/zampierilucas/kindle-button-mapper-rs/releases/latest/download/kindle-button-mapper.kpkg",
+          "version": [
+            1,
+            5,
+            2
+          ],
+          "dependencies": [],
+          "supported_platforms": [
+            "kindlehf",
+            "kindlepw2"
+          ]
+        }
+      ]
+    }
+  }
+}

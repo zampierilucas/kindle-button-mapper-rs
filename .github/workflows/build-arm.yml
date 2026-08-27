@@ -102,6 +102,17 @@ jobs:
           fi
           echo "All required files present."
 
+      - name: Create KPM package
+        run: |
+          sh kpm/gen-manifests.sh
+          # Stale index means KPM never offers the upgrade.
+          git diff --exit-code kpm/repo.json
+          cp kpm/manifest.json output/
+          # KPM only finds manifest.json at the archive root, so no ./ prefix.
+          tar -czf "kindle-button-mapper.kpkg" -C output $(ls -A output)
+          tar -tzf kindle-button-mapper.kpkg | grep -qx manifest.json
+          ls -lh kindle-button-mapper.kpkg
+
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
@@ -112,7 +123,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: kindle-button-mapper-armv7.tar.gz
+          files: |
+            kindle-button-mapper-armv7.tar.gz
+            kindle-button-mapper.kpkg
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
