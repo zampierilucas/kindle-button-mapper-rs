@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "kindle-button-mapper"
-version = "1.5.2"
+version = "1.5.3"
 dependencies = [
  "configparser",
  "env_logger",
