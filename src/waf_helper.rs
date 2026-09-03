@@ -119,7 +119,7 @@ fn route(method: &str, path: &str, body: &str, config_path: &str) -> (u16, Strin
         ("GET", "/devices") => (200, devices_json()),
         ("GET", "/actions") => (200, actions_json()),
         ("GET", "/layouts") => (200, layouts_json()),
-        ("GET", "/capture") => capture(&query),
+        ("GET", "/capture") => capture(&query, config_path),
         ("GET", "/record-gesture") => record_gesture(&query),
         ("POST", "/reload") => reload_daemon(),
         ("POST", "/stop") => stop_daemon(),
@@ -405,7 +405,7 @@ fn record_gesture(query: &std::collections::HashMap<String, String>) -> (u16, St
         }
     };
 
-    let ranges = axis_ranges(&device);
+    let ranges = crate::stick_ranges(&device);
     use nix::libc;
     use std::os::unix::io::AsRawFd;
     unsafe {
@@ -452,9 +452,9 @@ fn record_gesture(query: &std::collections::HashMap<String, String>) -> (u16, St
                 InputEventKind::AbsAxis(axis) => {
                     let code = axis.0;
                     if code == 0 || code == 53 {
-                        stroke.axis(true, axis_percent(&ranges, code, ev.value()));
+                        stroke.axis(true, crate::stick_percent(&ranges, code, ev.value()));
                     } else if code == 1 || code == 54 {
-                        stroke.axis(false, axis_percent(&ranges, code, ev.value()));
+                        stroke.axis(false, crate::stick_percent(&ranges, code, ev.value()));
                     }
                 }
                 _ => {}
@@ -465,29 +465,7 @@ fn record_gesture(query: &std::collections::HashMap<String, String>) -> (u16, St
     (200, json_err("timeout"))
 }
 
-fn axis_ranges(dev: &evdev::Device) -> std::collections::HashMap<u16, (i32, i32)> {
-    let states = match dev.get_abs_state() {
-        Ok(s) => s,
-        Err(_) => return std::collections::HashMap::new(),
-    };
-    [0u16, 1, 53, 54]
-        .iter()
-        .filter_map(|&code| {
-            let i = states.get(code as usize)?;
-            let half = ((i.maximum - i.minimum) / 2).max(1);
-            Some((code, ((i.minimum + i.maximum) / 2, half)))
-        })
-        .collect()
-}
-
-fn axis_percent(ranges: &std::collections::HashMap<u16, (i32, i32)>, code: u16, value: i32) -> i32 {
-    match ranges.get(&code) {
-        Some((centre, half)) => ((value - centre) * 100 / half).clamp(-100, 100),
-        None => 0,
-    }
-}
-
-fn capture(query: &std::collections::HashMap<String, String>) -> (u16, String) {
+fn capture(query: &std::collections::HashMap<String, String>, config_path: &str) -> (u16, String) {
     let lock = match CAPTURE_LOCK.try_lock() {
         Ok(g) => g,
         Err(_) => return (200, json_err("capture already running")),
@@ -512,6 +490,8 @@ fn capture(query: &std::collections::HashMap<String, String>) -> (u16, String) {
         Ok(d) => d,
         Err(e) => return (200, json_err(&format!("open {}: {}", path, e))),
     };
+    let ranges = crate::stick_ranges(&device);
+    let deadzone = crate::config::Config::load(config_path).map_or(50, |c| c.stick_deadzone);
     // Non-blocking so the deadline check actually fires when the device
     // is idle. Without this the read parks forever, holding CAPTURE_LOCK.
     use nix::libc;
@@ -548,17 +528,22 @@ fn capture(query: &std::collections::HashMap<String, String>) -> (u16, String) {
                     );
                 }
                 InputEventKind::AbsAxis(axis) => {
-                    if ev.value() == 0 {
-                        continue;
-                    }
                     let code = axis.0;
-                    let v = ev.value();
                     let kind = match code {
                         16 | 17 => "dpad",
                         9 | 10 => "trigger",
                         0 | 1 | 3 | 4 => "stick",
                         _ => continue,
                     };
+                    let v = if kind == "stick" {
+                        crate::stick_percent(&ranges, code, ev.value())
+                    } else {
+                        ev.value()
+                    };
+                    let idle = if kind == "stick" { v.abs() < deadzone } else { v == 0 };
+                    if idle {
+                        continue;
+                    }
                     drop(lock);
                     return (
                         200,
@@ -673,6 +658,14 @@ fn esc(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::sort_nodes;
+
+    #[test]
+    fn a_stick_that_centres_off_zero_still_names_both_directions() {
+        let ranges = std::collections::HashMap::from([(0u16, (128, 127))]);
+        assert_eq!(crate::stick_percent(&ranges, 0, 0), -100);
+        assert_eq!(crate::stick_percent(&ranges, 0, 255), 100);
+        assert_eq!(crate::stick_percent(&ranges, 0, 128), 0);
+    }
 
     fn node(path: &str, name: &str, uniq: &str, keys: usize) -> super::Node {
         (path.into(), name.into(), uniq.into(), keys)
