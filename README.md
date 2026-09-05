@@ -120,14 +120,15 @@ That covers everything drawn by X, which is the native reader, kterm and anythin
 launched under it. KOReader is not an X client: it opens the keyboard's event node
 itself and maps it through a hardcoded US table, so the bind-mount cannot reach it.
 The mapper closes that gap separately, by sending the character KOReader should have
-typed over its HTTP Inspector. The layout comes from the same place X gets it, by
+typed over its KOReader event endpoint (the HID Passthrough plugin's loopback port,
+or the HTTP Inspector as fallback). The layout comes from the same place X gets it, by
 asking `xkbcomp` to resolve the running keymap, so a language needs no data of its
 own. Two things have to be set.
 
 - `grab = true` and `passthrough = true` on the device, so the mapper holds the
   keyboard and KOReader reads only what the mapper relays.
-- KOReader's **HTTP Inspector** plugin enabled, the same one the `koreader:` actions
-  already use.
+- A KOReader that can take events, the HID Passthrough KOReader plugin (or the
+  HTTP Inspector enabled), the same channel the `koreader:` actions already use.
 
 Letters, digits, space and the editing keys relay as keycodes exactly as before,
 since KOReader types those correctly on its own and its shortcuts depend on them.
@@ -169,12 +170,12 @@ Three helper scripts ship with the mapper, so a binding can drive either reader:
 
 | | `scripts/auto.sh` (whatever is on screen) | `scripts/kindle.sh` (native reader) | `scripts/koreader.sh` (KOReader) |
 |---|---|---|---|
-| How it talks to the reader | picks one of the two below | virtual keyboard + `lipc` | HTTP Inspector on `localhost:8080` |
-| Setup needed | none | none | HTTP Inspector auto-start |
+| How it talks to the reader | picks one of the two below | virtual keyboard + `lipc` | KOReader event endpoint on `localhost:8323` (or the HTTP Inspector on `8080`) |
+| Setup needed | none | none | HID Passthrough KOReader plugin (or HTTP Inspector auto-start) |
 | Actions | `next_page`, `prev_page`, `menu`, `brightness <n>`, `brightness_toggle` | `next_page`, `prev_page`, `next_page_tap`, `prev_page_tap`, `home`, `back`, `toolbar`, `brightness <n>`, `brightness_toggle` | `next_page`, `prev_page`, `menu`, `night_mode`, `rotate`, `font_up`/`font_down`, `toggle_status_bar`, `brightness <n>`, `brightness_toggle` |
 
 `auto.sh` is what the Auto tab in MapperManager writes, and it is the one to use
-if you read in both: it sends the event to KOReader's HTTP Inspector and falls
+if you read in both: it sends the event to KOReader and falls
 back to the native reader when nothing is listening there. One binding per
 button covers both readers.
 
@@ -211,7 +212,7 @@ The panel never turns with the screen, so a tap for the right edge of a
 landscape page has to be rotated back into panel coordinates. `tap.sh` asks the
 framework which way up it is and does that itself. KOReader rotates in software
 and tells nobody, so there it reads as upright and the tap lands where it did in
-portrait — use its HTTP Inspector, which turns the page whatever the rotation.
+portrait — send it a KOReader event instead, which turns the page whatever the rotation.
 Set `TAP_ROTATION` to `0`, `90`, `180` or `270` to force the angle.
 
 Everything else goes over `lipc`.
@@ -260,7 +261,7 @@ Uninstall: `ssh kindle "sh /mnt/us/kindle-button-mapper/uninstall.sh"` (the scri
 - Linux kernel with evdev (`/dev/input/eventX`) — present on all stock Kindles.
 - An input device the Kindle can see — e.g. a Bluetooth gamepad/remote bridged via [kindle-hid-passthrough](https://github.com/zampierilucas/kindle-hid-passthrough), or any USB OTG HID device.
 - Nothing extra for the native Kindle reader — `scripts/kindle.sh` and `scripts/auto.sh` only need the daemon running.
-- **KOReader HTTP Inspector** (for KOReader integration): enable auto-start once in KOReader → *Tools → More Tools → HTTP Inspector → Auto-start HTTP server*. The default mappings in `scripts/koreader.sh` send commands to `localhost:8080`. MapperManager warns you in the KOReader action tab when this auto-start is off.
+- **KOReader integration**: nothing extra with the [HID Passthrough](https://github.com/zampierilucas/kindle-hid-passthrough) KOReader plugin installed, it serves the event endpoint on `localhost:8323`. Without it, enable auto-start once in KOReader → *Tools → More Tools → HTTP Inspector → Auto-start HTTP server*. MapperManager warns you in the KOReader action tab when neither is set up.
 
 ## Hardware
 

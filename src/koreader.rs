@@ -3,30 +3,30 @@ use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::time::Duration;
 
-const PORT: u16 = 8080;
+const PORTS: [u16; 2] = [8323, 8080];
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(300);
 const WRITE_TIMEOUT: Duration = Duration::from_millis(300);
 const READ_TIMEOUT: Duration = Duration::from_millis(300);
 
-fn connect() -> Option<TcpStream> {
-    let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, PORT));
-    match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
-        Ok(s) => {
-            let _ = s.set_nodelay(true);
-            let _ = s.set_write_timeout(Some(WRITE_TIMEOUT));
-            Some(s)
-        }
-        Err(e) => {
-            debug!("KOReader not reachable on port {}: {}", PORT, e);
-            None
+fn connect() -> Option<(TcpStream, u16)> {
+    for port in PORTS {
+        let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
+        match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
+            Ok(s) => {
+                let _ = s.set_nodelay(true);
+                let _ = s.set_write_timeout(Some(WRITE_TIMEOUT));
+                return Some((s, port));
+            }
+            Err(e) => debug!("KOReader not reachable on port {}: {}", port, e),
         }
     }
+    None
 }
 
-fn get(stream: &mut TcpStream, path: &str) -> bool {
+fn get(stream: &mut TcpStream, port: u16, path: &str) -> bool {
     let req = format!(
         "GET {} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
-        path, PORT
+        path, port
     );
     stream.write_all(req.as_bytes()).is_ok()
 }
@@ -42,13 +42,13 @@ pub fn reachable() -> bool {
 /// The inspector closes the connection after every response, so there is
 /// nothing to keep alive between calls.
 pub fn send_event(event: &str) -> bool {
-    let mut stream = match connect() {
+    let (mut stream, port) = match connect() {
         Some(s) => s,
         None => return false,
     };
     let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
 
-    if !get(&mut stream, &format!("/koreader/event/{}", event)) {
+    if !get(&mut stream, port, &format!("/koreader/event/{}", event)) {
         debug!("KOReader event '{}' not sent", event);
         return false;
     }
@@ -73,11 +73,11 @@ pub fn send_event(event: &str) -> bool {
 /// answers on the 50ms UI tick, and at typing speed that would stall the
 /// event loop for a tick per character.
 pub fn send_text(text: &str) -> bool {
-    let mut stream = match connect() {
+    let (mut stream, port) = match connect() {
         Some(s) => s,
         None => return false,
     };
-    get(&mut stream, &text_path(text))
+    get(&mut stream, port, &text_path(text))
 }
 
 /// The inspector runs unquoted args through `tonumber`, so a digit would
