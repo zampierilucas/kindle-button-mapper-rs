@@ -1,5 +1,7 @@
 use evdev::{AttributeSetRef, Device, Key};
 use log::{debug, info, warn};
+use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
+use std::os::fd::AsFd;
 use nix::sys::inotify::{AddWatchFlags, InitFlags, Inotify};
 use std::ffi::OsStr;
 use std::fs;
@@ -10,6 +12,7 @@ use std::time::Duration;
 const INPUT_DIR: &str = "/dev/input";
 const SETTLE_ATTEMPTS: u32 = 20;
 const SETTLE_INTERVAL: Duration = Duration::from_millis(100);
+const RESCAN_TIMEOUT_MS: u16 = 3000;
 
 /// A Bluetooth node's uniq carries the address type as a suffix
 /// ("E0:F6:B5:BC:1C:7F/P"), but configs hold the bare MAC in whatever case
@@ -125,7 +128,7 @@ impl InputHandler {
     }
 
     fn wait_for_matching_device(&self) -> Result<Device, String> {
-        let inotify = Inotify::init(InitFlags::empty())
+        let inotify = Inotify::init(InitFlags::IN_NONBLOCK)
             .map_err(|e| format!("inotify_init failed: {}", e))?;
         inotify.add_watch(Path::new(INPUT_DIR), AddWatchFlags::IN_CREATE)
             .map_err(|e| format!("inotify_add_watch failed: {}", e))?;
@@ -137,6 +140,23 @@ impl InputHandler {
         }
 
         loop {
+            let mut fds = [PollFd::new(inotify.as_fd(), PollFlags::POLLIN)];
+            let ready = poll(&mut fds, PollTimeout::from(RESCAN_TIMEOUT_MS))
+                .map_err(|e| format!("poll on inotify failed: {}", e))?;
+
+            if ready == 0 {
+                // The settle window below can still miss: a uhid node's uniq
+                // may be filled in later than that, and a node number reused
+                // for a different device produces no second event. Without
+                // this timeout rescan the worker would then wait for a
+                // creation event that never comes, until the device
+                // reconnected.
+                if let Some(dev) = self.scan_for_device()? {
+                    return Ok(dev);
+                }
+                continue;
+            }
+
             let events = inotify.read_events()
                 .map_err(|e| format!("inotify read failed: {}", e))?;
 
@@ -150,10 +170,9 @@ impl InputHandler {
             // A node is not usable the instant it appears: udev still has to
             // apply permissions, and a uhid node's uniq is filled in after
             // the node shows up. Probing once right after the event loses
-            // that race often enough to matter, and since the event is
-            // consumed the device would then be ignored until it connects
-            // again, which is why it took a power cycle to come good. Rescan
-            // over a short window instead of trusting a single probe.
+            // that race often enough to matter. Rescan over a short window
+            // instead of trusting a single probe; the poll timeout above
+            // covers whatever this window still misses.
             for _ in 0..SETTLE_ATTEMPTS {
                 thread::sleep(SETTLE_INTERVAL);
                 if let Some(dev) = self.scan_for_device()? {
