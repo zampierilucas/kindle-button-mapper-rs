@@ -319,11 +319,10 @@ fn run_event_loop(
     // Non-blocking + poll so we can notice a capture pause while idle.
     set_nonblocking(device.as_raw_fd());
     let ranges = stick_ranges(device);
-    // ABS_X/ABS_Y mean a contact on a touch device and a stick on a pad, so
-    // the device decides which once, not every event.
-    let touch_device = device
-        .supported_keys()
-        .is_some_and(|k| k.contains(evdev::Key::BTN_TOUCH));
+    let touch_device = device.properties().contains(evdev::PropType::DIRECT)
+        || device
+            .supported_absolute_axes()
+            .is_some_and(|a| a.contains(evdev::AbsoluteAxisType::ABS_MT_POSITION_X));
     let mut grab = grab;
     let mut grabbed = grab;
 
@@ -417,7 +416,7 @@ fn run_event_loop(
                         vkeyboard::pointer_sync();
                     }
                 }
-                InputEventKind::Key(key) if key.code() == 330 => {  // BTN_TOUCH
+                InputEventKind::Key(key) if key.code() == 330 && touch_device => {  // BTN_TOUCH
                     activity = true;
                     mapper.handle_touch(event.value() == 1);
                 }
@@ -500,7 +499,7 @@ fn downgrade_relay(cfg: &mut config::DeviceConfig, grab: bool) -> bool {
 }
 
 /// Centre and half-travel per axis; pads disagree on range, the mapper sees a percentage.
-fn stick_ranges(dev: &evdev::Device) -> HashMap<u16, (i32, i32)> {
+pub fn stick_ranges(dev: &evdev::Device) -> HashMap<u16, (i32, i32)> {
     let states = match dev.get_abs_state() {
         Ok(s) => s,
         Err(_) => return HashMap::new(),
@@ -515,7 +514,7 @@ fn stick_ranges(dev: &evdev::Device) -> HashMap<u16, (i32, i32)> {
         .collect()
 }
 
-fn stick_percent(ranges: &HashMap<u16, (i32, i32)>, code: u16, value: i32) -> i32 {
+pub fn stick_percent(ranges: &HashMap<u16, (i32, i32)>, code: u16, value: i32) -> i32 {
     match ranges.get(&code) {
         Some((centre, half)) => ((value - centre) * 100 / half).clamp(-100, 100),
         None => 0,
