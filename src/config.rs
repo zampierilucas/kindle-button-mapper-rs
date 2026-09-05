@@ -37,6 +37,7 @@ pub struct DeviceConfig {
     /// of the mouse keeps working.
     pub mouse: bool,
     pub keyboard_layout: Option<String>,
+    pub key_repeat: Option<(u32, u32)>,
     pub mappings: HashMap<Key, String>,
     pub long_press_mappings: HashMap<Key, String>,
     pub dpad_mappings: HashMap<DpadDirection, String>,
@@ -105,6 +106,7 @@ impl DeviceConfig {
             passthrough: false,
             mouse: false,
             keyboard_layout: None,
+            key_repeat: None,
             mappings: HashMap::new(),
             long_press_mappings: HashMap::new(),
             dpad_mappings: HashMap::new(),
@@ -264,6 +266,7 @@ impl Config {
                         .map(str::trim)
                         .filter(|v| !v.is_empty())
                         .map(String::from);
+                    dev.key_repeat = get(entries, "key_repeat").and_then(parse_key_repeat);
                 }
                 Some("buttons") => fill_key_map(entries, &mut dev.mappings),
                 Some("longpress") => fill_key_map(entries, &mut dev.long_press_mappings),
@@ -304,6 +307,13 @@ fn get<'a>(section: &'a HashMap<String, Option<String>>, key: &str) -> Option<&'
 
 fn parse_bool(v: &str) -> bool {
     matches!(v.trim().to_ascii_lowercase().as_str(), "true" | "yes" | "1" | "on")
+}
+
+fn parse_key_repeat(v: &str) -> Option<(u32, u32)> {
+    let (delay, rate) = v.split_once(',')?;
+    let delay: u32 = delay.trim().parse().ok()?;
+    let rate: u32 = rate.trim().parse().ok()?;
+    (delay > 0 && rate > 0).then_some((delay, rate))
 }
 
 fn fill_key_map(
@@ -420,6 +430,22 @@ mod tests {
         assert!(pad.grab && !pad.grab_explicit);
         let kbd = cfg.devices.iter().find(|d| d.id == "kbd").expect("kbd");
         assert!(kbd.grab && kbd.grab_explicit);
+    }
+
+    #[test]
+    fn key_repeat_takes_a_delay_and_a_rate() {
+        assert_eq!(parse_key_repeat("250,20"), Some((250, 20)));
+        assert_eq!(parse_key_repeat(" 400 , 25 "), Some((400, 25)));
+        assert_eq!(parse_key_repeat("250"), None);
+        assert_eq!(parse_key_repeat("0,20"), None);
+        assert_eq!(parse_key_repeat("250,0"), None);
+        assert_eq!(parse_key_repeat("fast,20"), None);
+
+        let cfg = load_str(
+            "kbm-key-repeat.ini",
+            "[device.kbd]\nuniq = 11:22:33:44:55:66\nkey_repeat = 250,20\n",
+        );
+        assert_eq!(cfg.devices[0].key_repeat, Some((250, 20)));
     }
 
     #[test]

@@ -40,6 +40,16 @@ impl Drop for LayoutOverride {
     }
 }
 
+pub fn set_key_repeat(delay_ms: u32, rate: u32) {
+    let delay = delay_ms.to_string();
+    let rate = rate.to_string();
+    if run("xset", &["-display", ":0", "r", "rate", &delay, &rate]) {
+        info!("key repeat {delay_ms}ms then {rate}/s");
+    } else {
+        warn!("key repeat {delay_ms},{rate}: xset failed");
+    }
+}
+
 fn symbols(groups: &[&str]) -> String {
     let mut s = String::from("default partial alphanumeric_keys modifier_keys\nxkb_symbols \"basic\" {\n");
     for (i, g) in groups.iter().enumerate() {

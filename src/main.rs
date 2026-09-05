@@ -222,7 +222,7 @@ fn device_worker(mut cfg: config::DeviceConfig, mut settings: WorkerSettings) {
                     if gamepad {
                         cfg.apply_default_layout();
                         mapper = Mapper::new(&cfg, &settings);
-                    } else if cfg.keyboard_layout.is_none() {
+                    } else if cfg.keyboard_layout.is_none() && cfg.key_repeat.is_none() {
                         info!(
                             "[{}] no mappings and not a gamepad — leaving it alone until something is mapped",
                             cfg.id
@@ -277,6 +277,9 @@ fn device_worker(mut cfg: config::DeviceConfig, mut settings: WorkerSettings) {
                         (true, false, false) => "exclusive",
                     }
                 );
+                if let Some((delay, rate)) = cfg.key_repeat {
+                    layout::set_key_repeat(delay, rate);
+                }
                 if let Some(ref script) = settings.on_connect {
                     info!("[{}] running on_connect script", cfg.id);
                     execute_script(script);

@@ -86,6 +86,7 @@ grab = true
 # type = mouse             # mapped buttons act instead of clicking
 # keyboard_layout = fr     # XKB layout override (comma list for an Alt+Shift toggle, e.g. us,ru)
 # passthrough = true       # required for keyboard_layout to reach KOReader
+# key_repeat = 250,20      # X key auto-repeat: delay in ms, then repeats per second
 
 [device.gamepad.buttons]
 # button_code = /path/to/script.sh
@@ -140,6 +141,14 @@ are the group toggles from a comma list, since KOReader has nothing to toggle wi
 Set `type = mouse` to map a mouse's buttons. Mapped buttons run their action
 instead of clicking; the pointer, wheel and unmapped buttons keep working as a
 normal mouse.
+
+Set `key_repeat` to `delay_ms,rate_per_second` (e.g. `250,20`) to make a held
+key repeat. The firmware starts X with `-ardelay 0 -arinterval 0`, so nothing
+repeats anywhere in the native reader, a WAF app or kterm until a rate is set;
+the mapper applies yours whenever that device connects. It is a system-wide X
+setting, so on a model with physical page buttons a held button will turn pages
+repeatedly too. Leave it unset to keep the firmware's behaviour. KOReader reads
+the event node itself and never sees this setting.
 
 A button fires as soon as it goes down. Give it a `longpress` mapping and it
 fires on release instead, since a short press is only a short press once you
