@@ -768,7 +768,7 @@ var MapperManager = (function() {
     function showAutoNote() {
         var el = getEl("koreaderStatus");
         el.className = "koreader-status";
-        el.innerHTML = "Goes to KOReader when it is running with the HTTP Inspector on, "
+        el.innerHTML = "Goes to KOReader when it is running, "
             + "and to the native reader otherwise \u2014 one binding covers both.";
     }
 
@@ -776,11 +776,11 @@ var MapperManager = (function() {
         var el = getEl("koreaderStatus");
         el.className = "koreader-status hidden";
         getJSON("/koreader/status", function(data, err) {
-            if (actionTab !== "koreader" || !data || err || data.autostart) return;
+            if (actionTab !== "koreader" || !data || err || data.autostart || data.plugin) return;
             el.className = "koreader-status";
-            el.innerHTML = "KOReader HTTP Inspector is off. In KOReader, open "
-                + "<b>Tools → More Tools → HTTP Inspector → Auto start HTTP server</b> "
-                + "to use these actions.";
+            el.innerHTML = "KOReader can't take these actions yet. Install the "
+                + "HID Passthrough KOReader plugin, or in KOReader open "
+                + "<b>Tools → More Tools → HTTP Inspector → Auto start HTTP server</b>.";
         });
     }
 

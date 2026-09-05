@@ -353,11 +353,18 @@ fn status_json(config_path: &str) -> String {
 
 const KOREADER_SETTINGS_PATH: &str = "/mnt/us/koreader/settings.reader.lua";
 
+const KOPLUGIN_EVENTSERVER_PATH: &str =
+    "/mnt/us/koreader/plugins/hidpassthrough.koplugin/eventserver.lua";
+
 fn koreader_status_json() -> String {
     let autostart = fs::read_to_string(KOREADER_SETTINGS_PATH)
         .map(|s| httpinspector_autostart_enabled(&s))
         .unwrap_or(false);
-    format!("{{\"ok\":true,\"autostart\":{}}}", autostart)
+    let plugin = std::path::Path::new(KOPLUGIN_EVENTSERVER_PATH).exists();
+    format!(
+        "{{\"ok\":true,\"autostart\":{},\"plugin\":{}}}",
+        autostart, plugin
+    )
 }
 
 fn httpinspector_autostart_enabled(lua: &str) -> bool {
