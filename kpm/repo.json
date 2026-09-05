@@ -13,8 +13,8 @@
           "url": "https://github.com/zampierilucas/kindle-button-mapper-rs/releases/latest/download/kindle-button-mapper.kpkg",
           "version": [
             1,
-            5,
-            3
+            6,
+            0
           ],
           "dependencies": [],
           "supported_platforms": [
