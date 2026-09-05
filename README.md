@@ -8,6 +8,7 @@ A Rust-based Linux input device event mapper for Kindle e-readers. Maps button p
 - Page turns and reader controls for both the native Kindle reader and KOReader
 - Long press support with separate actions
 - Auto-repeat when buttons are held
+- Recorded stick/touch gestures, bound by name
 - Debouncing to prevent double-triggers
 - Auto-reconnect on device disconnect
 - Optional exclusive device grab
@@ -68,6 +69,15 @@ log_buttons = true
 keep_awake = true
 on_connect = /path/to/script.sh
 on_disconnect = /path/to/script.sh
+# How far a contact must travel, as a percent of the axis range, before it
+# counts as a gesture rather than a tap.
+gesture_min_percent = 15
+# How closely a movement must match a recorded one. Lower is stricter.
+gesture_tolerance = 0.30
+
+[gestures]
+# Recorded gestures live here, written by the Record gesture button.
+# flick_left = -1.000,0.021 -0.870,0.019 ...
 
 [device.gamepad]
 name = Device Name
@@ -94,6 +104,9 @@ grab = true
 
 [device.gamepad.triggers_longpress]
 # lt/rt = /path/to/script.sh
+
+[device.gamepad.gestures]
+# gesture_name = /path/to/script.sh
 ```
 
 Devices are matched by identity, never by `/dev/input/eventX` path (that index is
@@ -133,6 +146,13 @@ fires on release instead, since a short press is only a short press once you
 let go.
 
 Use `log_buttons = true` to discover button codes for your device.
+
+Gestures are recorded once — the *Record gesture* button in MapperManager writes
+the captured movement into `[gestures]` — and then bound by name per device. A
+movement shorter than `gesture_min_percent` of the axis range is treated as a
+tap, not a gesture. `gesture_tolerance` sets how closely a movement must match a
+recorded one to fire: lower is stricter, raise it if your gestures don't trigger
+reliably.
 
 ### Reader actions
 
