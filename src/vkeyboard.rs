@@ -8,11 +8,12 @@ use std::mem;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, Once, OnceLock};
 use std::time::{Duration, Instant};
 use std::thread;
 
 const UINPUT_DEV: &str = "/dev/uinput";
+const SYS_UINPUT: &str = "/sys/class/misc/uinput";
 const TARGET_FILE: &str = "/var/run/kindle-button-mapper-key-target";
 const FIFO_PATH: &str = "/var/run/kindle-button-mapper-key.fifo";
 const FIFO_OWNER: &str = "/var/run/kindle-button-mapper-key-owner";
@@ -182,6 +183,14 @@ pub fn serve(dev: Option<File>) {
         .spawn(fifo_loop)
         .map(|_| ())
         .unwrap_or_else(|e| warn!("Cannot spawn key FIFO thread: {}", e));
+}
+
+pub fn retry() {
+    static ONCE: Once = Once::new();
+    if INJECTOR.get().is_some() || !driver_registered() {
+        return;
+    }
+    ONCE.call_once(|| serve(try_init()));
 }
 
 fn fifo_loop() {
@@ -575,7 +584,7 @@ fn dev_node(file: &File) -> io::Result<PathBuf> {
             continue;
         }
         let path = Path::new(DEV_INPUT).join(&name);
-        ensure_event_node(&path, &sysdir.join(&name))?;
+        mknod_from_sysfs(&path, &sysdir.join(&name))?;
         return Ok(path);
     }
 
@@ -585,23 +594,27 @@ fn dev_node(file: &File) -> io::Result<PathBuf> {
     ))
 }
 
+fn driver_registered() -> bool {
+    Path::new(SYS_UINPUT).exists()
+}
+
 fn ensure_uinput_node() -> Result<(), String> {
     if Path::new(UINPUT_DEV).exists() {
         return Ok(());
     }
-    // Kernel built with CONFIG_INPUT_UINPUT=y but no devtmpfs node — create it.
-    let status = Command::new("mknod")
-        .args([UINPUT_DEV, "c", "10", "223"])
-        .status()
-        .map_err(|e| format!("mknod missing: {}", e))?;
-    if !status.success() {
-        return Err(format!("mknod exit {}", status.code().unwrap_or(-1)));
+    if !driver_registered() {
+        let _ = Command::new("/sbin/modprobe").arg("uinput").status();
     }
-    let _ = Command::new("chmod").args(["600", UINPUT_DEV]).status();
-    Ok(())
+    if !driver_registered() {
+        return Err(format!(
+            "the uinput driver is not loaded (no {}) — a node made here could never be opened, and would stop kindle-hid-passthrough from insmod'ing its bundled uinput.ko",
+            SYS_UINPUT
+        ));
+    }
+    mknod_from_sysfs(Path::new(UINPUT_DEV), Path::new(SYS_UINPUT)).map_err(|e| e.to_string())
 }
 
-fn ensure_event_node(path: &Path, sysdir: &Path) -> io::Result<()> {
+fn mknod_from_sysfs(path: &Path, sysdir: &Path) -> io::Result<()> {
     if path.exists() {
         return Ok(());
     }
