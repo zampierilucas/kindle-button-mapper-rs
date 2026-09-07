@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use std::thread;
 
 const UINPUT_DEV: &str = "/dev/uinput";
+const UINPUT_SYS: &str = "/sys/class/misc/uinput";
 const TARGET_FILE: &str = "/var/run/kindle-button-mapper-key-target";
 const FIFO_PATH: &str = "/var/run/kindle-button-mapper-key.fifo";
 const FIFO_OWNER: &str = "/var/run/kindle-button-mapper-key-owner";
@@ -158,7 +159,23 @@ pub fn forward(code: u16, value: i32) -> bool {
 pub fn serve(dev: Option<File>) {
     let pager = Pager::find();
     if dev.is_none() && matches!(pager, Pager::VirtualKeyboard) {
-        warn!("No page buttons and no uinput keyboard — nothing to inject into, use the tap page turn actions");
+        warn!("No page buttons and no uinput keyboard — tap page turns for now, watching for the uinput driver");
+        // kindle-hid-passthrough loads uinput.ko from its own upstart job, which
+        // can be minutes after ours. Without this the daemon stays on the tap
+        // fallback until someone restarts it by hand.
+        thread::Builder::new()
+            .name("uinputwait".into())
+            .spawn(|| loop {
+                thread::sleep(Duration::from_secs(30));
+                if Path::new(UINPUT_SYS).exists() {
+                    if let Some(dev) = try_init() {
+                        serve(Some(dev));
+                        return;
+                    }
+                }
+            })
+            .map(|_| ())
+            .unwrap_or_else(|e| warn!("Cannot spawn uinput watcher: {}", e));
         return;
     }
     if INJECTOR.set(Mutex::new(Injector { dev, pager })).is_err() {
@@ -586,10 +603,20 @@ fn dev_node(file: &File) -> io::Result<PathBuf> {
 }
 
 fn ensure_uinput_node() -> Result<(), String> {
+    // Without the driver registered no node can work, and mknod'ing one anyway
+    // leaves a dead node behind that stops kindle-hid-passthrough from loading
+    // its bundled uinput.ko — its recovery path checks whether the node exists.
+    if !Path::new(UINPUT_SYS).exists() {
+        return Err(format!(
+            "uinput driver not loaded (no {}) — install kindle-hid-passthrough, \
+             it insmods a bundled uinput.ko at startup",
+            UINPUT_SYS
+        ));
+    }
     if Path::new(UINPUT_DEV).exists() {
         return Ok(());
     }
-    // Kernel built with CONFIG_INPUT_UINPUT=y but no devtmpfs node — create it.
+    // Driver registered but no devtmpfs node — create it.
     let status = Command::new("mknod")
         .args([UINPUT_DEV, "c", "10", "223"])
         .status()
