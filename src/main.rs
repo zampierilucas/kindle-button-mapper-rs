@@ -135,6 +135,7 @@ fn main() {
             info!("[{}] new in the config, starting a worker", device.id);
             spawn_worker(device, settings.clone());
         }
+        vkeyboard::retry();
         thread::sleep(Duration::from_millis(200));
     }
 }
