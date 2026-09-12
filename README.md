@@ -172,7 +172,7 @@ Three helper scripts ship with the mapper, so a binding can drive either reader:
 |---|---|---|---|
 | How it talks to the reader | picks one of the two below | virtual keyboard + `lipc` | KOReader event endpoint on `localhost:8323` (or the HTTP Inspector on `8080`) |
 | Setup needed | none | none | HID Passthrough KOReader plugin (or HTTP Inspector auto-start) |
-| Actions | `next_page`, `prev_page`, `menu`, `brightness <n>`, `brightness_toggle` | `next_page`, `prev_page`, `next_page_tap`, `prev_page_tap`, `home`, `back`, `toolbar`, `brightness <n>`, `brightness_toggle` | `next_page`, `prev_page`, `menu`, `night_mode`, `rotate`, `font_up`/`font_down`, `toggle_status_bar`, `brightness <n>`, `brightness_toggle` |
+| Actions | `next_page`, `prev_page`, `menu`, `brightness <n>`, `brightness_toggle` | `next_page`, `prev_page`, `next_page_tap`, `prev_page_tap`, `home`, `back`, `toolbar`, `brightness <n>`, `brightness_toggle`, `suspend` | `next_page`, `prev_page`, `menu`, `night_mode`, `rotate`, `font_up`/`font_down`, `toggle_status_bar`, `brightness <n>`, `brightness_toggle` |
 
 `auto.sh` is what the Auto tab in MapperManager writes, and it is the one to use
 if you read in both: it sends the event to KOReader and falls
