@@ -183,6 +183,12 @@ impl Mapper {
                     }
                 }
 
+                // A long-press binding fires once per hold. Falling through
+                // would repeat the short action underneath it.
+                if self.long_press_mappings.contains_key(&key) {
+                    return;
+                }
+
                 // Repeat mode: repeat the normal action at repeat_ms interval
                 if self.repeat_ms > 0 {
                     let should_repeat = self
@@ -320,20 +326,18 @@ impl Mapper {
 
             // Check for long press threshold
             if elapsed >= Duration::from_millis(self.long_press_ms) {
-                // Use long press mapping if available, otherwise fall back to normal
-                let script = self.dpad_longpress_mappings.get(&dir)
-                    .or_else(|| self.dpad_mappings.get(&dir));
-
-                if let Some(script) = script {
-                    // Log first long press differently
+                // A long-press binding fires once per hold; only a plain
+                // mapping keeps repeating while held.
+                if let Some(script) = self.dpad_longpress_mappings.get(&dir) {
                     if !long_press_fired {
                         if self.log_buttons {
                             info!("D-pad long press: {:?} -> {}", dir, script);
                         }
                         self.dpad_longpress_fired.insert(dir, true);
-                    } else {
-                        debug!("D-pad repeat: {:?} -> {}", dir, script);
+                        execute_script(script);
                     }
+                } else if let Some(script) = self.dpad_mappings.get(&dir) {
+                    debug!("D-pad repeat: {:?} -> {}", dir, script);
                     execute_script(script);
                 }
             }
@@ -482,20 +486,18 @@ impl Mapper {
 
             // Check for long press threshold
             if elapsed >= Duration::from_millis(self.long_press_ms) {
-                // Use long press mapping if available, otherwise fall back to normal
-                let script = self.trigger_longpress_mappings.get(&trigger)
-                    .or_else(|| self.trigger_mappings.get(&trigger));
-
-                if let Some(script) = script {
-                    // Log first long press differently
+                // A long-press binding fires once per hold; only a plain
+                // mapping keeps repeating while held.
+                if let Some(script) = self.trigger_longpress_mappings.get(&trigger) {
                     if !long_press_fired {
                         if self.log_buttons {
                             info!("Trigger long press: {:?} -> {}", trigger, script);
                         }
                         self.trigger_longpress_fired.insert(trigger, true);
-                    } else {
-                        debug!("Trigger repeat: {:?} -> {}", trigger, script);
+                        execute_script(script);
                     }
+                } else if let Some(script) = self.trigger_mappings.get(&trigger) {
+                    debug!("Trigger repeat: {:?} -> {}", trigger, script);
                     execute_script(script);
                 }
             }
@@ -562,6 +564,26 @@ mod tests {
         m.handle_stick(1, -70);
         assert_eq!(m.stick_pushed.get(&1).copied(), Some(true));
         assert_eq!(m.stick_pushed.get(&0).copied(), Some(false));
+    }
+
+    #[test]
+    fn a_fired_long_press_does_not_repeat_the_short_action() {
+        let mut cfg = DeviceConfig::for_test("dev");
+        cfg.mappings.insert(Key::new(30), "/bin/true".into());
+        cfg.long_press_mappings.insert(Key::new(30), "/bin/true".into());
+        let mut s = test_settings();
+        s.long_press_ms = 0;
+        s.repeat_ms = 1;
+        let mut m = Mapper::new(&cfg, &s);
+
+        m.handle_press(Key::new(30));
+        m.handle_held(Key::new(30)); // long press fires here, once
+        assert_eq!(m.long_press_fired.get(&Key::new(30)).copied(), Some(true));
+        let fired_at = m.last_repeat.get(&Key::new(30)).copied();
+
+        std::thread::sleep(Duration::from_millis(5));
+        m.handle_held(Key::new(30)); // still held: nothing more may fire
+        assert_eq!(m.last_repeat.get(&Key::new(30)).copied(), fired_at);
     }
 
     #[test]

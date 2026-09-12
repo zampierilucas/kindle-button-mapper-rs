@@ -12,6 +12,7 @@
 #   toolbar           - Toggle the reader toolbar
 #   brightness <n>    - Adjust frontlight (positive=up, negative=down)
 #   brightness_toggle - Toggle frontlight off/on
+#   suspend           - Put the device to sleep
 #
 # Page turns are handed to the daemon, which injects into the physical page
 # buttons on models that have them and falls back to KEY_DOWN/KEY_UP on its
@@ -23,6 +24,7 @@
 DIR=$(dirname "$0")
 LOG_PATH="/var/log/kindle-button-mapper.log"
 FL_SAVED="/var/run/kindle-button-mapper-fl"
+SUSPEND_STAMP="/var/run/kindle-button-mapper-suspend"
 
 warn() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') WARN  kindle.sh: $1" >> "$LOG_PATH" 2>/dev/null
@@ -99,11 +101,23 @@ case "$1" in
             fl_set "$prev"
         fi
         ;;
+    suspend)
+        # powerButton is a toggle and a held button repeats its action, so
+        # calls within 2s of the last are dropped: one press, one transition.
+        now=$(date +%s)
+        last=$(cat "$SUSPEND_STAMP" 2>/dev/null)
+        case "$last" in ''|*[!0-9]*) last=0 ;; esac
+        if [ $(( now - last )) -ge 2 ]; then
+            echo "$now" > "$SUSPEND_STAMP" 2>/dev/null
+            lipc-set-prop com.lab126.powerd powerButton 1 2>/dev/null \
+                || warn "suspend: powerd not reachable"
+        fi
+        ;;
     *)
         echo "Usage: $0 <command> [args...]"
         echo "Commands: next_page, prev_page, next_page_tap, prev_page_tap,"
         echo "          home, back, toolbar,"
-        echo "          brightness <n>, brightness_toggle"
+        echo "          brightness <n>, brightness_toggle, suspend"
         exit 1
         ;;
 esac
