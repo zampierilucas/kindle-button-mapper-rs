@@ -994,7 +994,9 @@ var MapperManager = (function() {
         getEl("devDetailUniq").value = prefillUniq || "";
         getEl("devDetailGrab").className = "toggle";
         getEl("devDetailMouse").className = "toggle";
+        getEl("devDetailPassthrough").className = "toggle";
         setDeviceLayout("");
+        getEl("devDetailRepeat").value = "";
         getEl("btnDeviceDelete").style.display = "none";
         updateDeviceIdView();
         showOverlay("deviceDetailOverlay");
@@ -1009,7 +1011,10 @@ var MapperManager = (function() {
         getEl("devDetailGrab").className = "toggle" + (grab ? " on" : "");
         var mouse = (getValue("device." + id, "type") || "").toLowerCase() === "mouse";
         getEl("devDetailMouse").className = "toggle" + (mouse ? " on" : "");
+        var passthrough = (getValue("device." + id, "passthrough") || "").toLowerCase() === "true";
+        getEl("devDetailPassthrough").className = "toggle" + (passthrough ? " on" : "");
         setDeviceLayout(getValue("device." + id, "keyboard_layout") || "");
+        getEl("devDetailRepeat").value = getValue("device." + id, "key_repeat") || "";
         getEl("btnDeviceDelete").style.display = "block";
         getEl("devDetailIdView").innerHTML = escapeHtml(id);
         showOverlay("deviceDetailOverlay");
@@ -1035,6 +1040,13 @@ var MapperManager = (function() {
         if (on) { getEl("devDetailGrab").className = "toggle on"; }
     }
 
+    function toggleDeviceDetailPassthrough() {
+        var t = getEl("devDetailPassthrough");
+        var on = t.className.indexOf(" on") < 0;
+        t.className = on ? "toggle on" : "toggle";
+        if (on) { getEl("devDetailGrab").className = "toggle on"; }
+    }
+
     function autoIdFromName(s) {
         return s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").substring(0, 30) || "device";
     }
@@ -1053,6 +1065,13 @@ var MapperManager = (function() {
         }
         var exclusive = getEl("devDetailGrab").className.indexOf(" on") >= 0;
         var mouse = getEl("devDetailMouse").className.indexOf(" on") >= 0;
+        var passthrough = getEl("devDetailPassthrough").className.indexOf(" on") >= 0;
+        var repeat = (getEl("devDetailRepeat").value || "").replace(/\s+/g, "");
+        var rm = repeat.match(/^(\d+),(\d+)$/);
+        if (repeat && !(rm && parseInt(rm[1], 10) > 0 && parseInt(rm[2], 10) > 0)) {
+            showMessage("Key repeat must be delay,rate e.g. 250,20", true);
+            return;
+        }
 
         if (!editingDeviceId && listDeviceIds().indexOf(newId) >= 0) {
             showMessage("A device with that name already exists", true);
@@ -1068,7 +1087,9 @@ var MapperManager = (function() {
         setOrDel(section, "grab", pinned ? String(exclusive) : "");
         setOrDel(section, "uniq", uniq);
         setOrDel(section, "type", mouse ? "mouse" : "");
+        setOrDel(section, "passthrough", passthrough ? "true" : "");
         setOrDel(section, "keyboard_layout", layout);
+        setOrDel(section, "key_repeat", repeat);
         delValue(section, "path");
 
         if (!currentDeviceId) currentDeviceId = newId;
@@ -1242,6 +1263,13 @@ var MapperManager = (function() {
         getEl("devDetailMouse").addEventListener("click", toggleDeviceDetailMouse, false);
         getEl("devDetailMouseInfo").addEventListener("click", function() {
             showInfo("Buttons you map run their action instead of clicking.\nThe pointer, wheel and unmapped buttons keep working as a normal mouse.\nTurns on Exclusive, the mapper needs to own the device.");
+        }, false);
+        getEl("devDetailPassthrough").addEventListener("click", toggleDeviceDetailPassthrough, false);
+        getEl("devDetailPassthroughInfo").addEventListener("click", function() {
+            showInfo("Passthrough: keys you have not mapped keep working as normal keys while the device is Exclusive, so a grabbed keyboard still types. Needed for Layout to reach KOReader.\nTurns on Exclusive, the mapper needs to own the device.");
+        }, false);
+        getEl("devDetailRepeatInfo").addEventListener("click", function() {
+            showInfo("Key repeat: delay in ms, then repeats per second (e.g. 250,20), so a held key repeats in the reader, WAF apps and kterm. System-wide, a held page button repeats too. KOReader ignores it. Leave empty to keep the firmware's behaviour.");
         }, false);
         getEl("devDetailLayoutInfo").addEventListener("click", function() {
             showInfo("Keyboard layout: pick an XKB layout re-applied every time this keyboard connects, so a non-US layout survives reconnects. Choose (system default) to leave the layout untouched.");
