@@ -36,7 +36,7 @@ const KEEP_AWAKE_RELEASE: &str = "lipc-set-prop com.lab126.powerd preventScreenS
 fn main() {
     env_logger::Builder::from_env(
         env_logger::Env::default().default_filter_or("info")
-    ).init();
+    ).format_timestamp_millis().init();
 
     let args: Vec<String> = env::args().collect();
 

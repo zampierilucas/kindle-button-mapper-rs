@@ -1,9 +1,10 @@
 use crate::{koreader, vkeyboard};
-use log::{debug, error};
+use log::{debug, error, info};
 use std::process::Command;
 use std::sync::mpsc::{self, Sender};
 use std::sync::OnceLock;
 use std::thread;
+use std::time::Instant;
 
 /// Steps run in order until one lands, which is how `auto.sh` picks a reader.
 #[derive(Debug, PartialEq)]
@@ -27,11 +28,23 @@ pub fn spawn_shell(script: &str) {
     match Command::new("/bin/sh").args(["-c", script]).spawn() {
         Ok(mut child) => {
             // Reap elsewhere, no zombies.
+            let started = Instant::now();
+            let script = script.to_string();
             thread::spawn(move || {
                 let _ = child.wait();
+                log_duration(started, &script);
             });
         }
         Err(e) => error!("Failed to execute '{}': {}", script, e),
+    }
+}
+
+fn log_duration(started: Instant, script: &str) {
+    let ms = started.elapsed().as_millis();
+    if ms >= 100 {
+        info!("Finished in {}ms: {}", ms, script);
+    } else {
+        debug!("Finished in {}ms: {}", ms, script);
     }
 }
 
@@ -45,7 +58,9 @@ fn queue(script: String, steps: Vec<Step>) {
             .name("actions".into())
             .spawn(move || {
                 for (script, steps) in rx {
+                    let started = Instant::now();
                     execute(&script, &steps);
+                    log_duration(started, &script);
                 }
             })
             .expect("spawn action thread");
