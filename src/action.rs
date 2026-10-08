@@ -93,10 +93,17 @@ fn plan(script: &str) -> Option<Vec<Step>> {
         return None; // more than one argument is never a hot path
     }
 
-    // `koreader.sh event <Name>` is any Dispatcher action the plugin offers,
-    // so it is the common case rather than an exotic one. Everything else
-    // taking an argument (brightness, font size) stays a shell call.
+    // `koreader.sh event <Name>` is any Dispatcher action the plugin offers.
+    // Warmth steps also go directly to KOReader without spawning a shell.
     if let Some(arg) = arg {
+        if name == "koreader.sh" && cmd == "warmth" {
+            if let Ok(step) = arg.parse::<i32>() {
+                if step != 0 {
+                    let event = if step > 0 { "IncreaseFlWarmth" } else { "DecreaseFlWarmth" };
+                    return Some(vec![Step::Koreader(format!("{}/{}", event, step.unsigned_abs()))]);
+                }
+            }
+        }
         if name == "koreader.sh" && cmd == "event" && is_event_name(arg) {
             return Some(vec![Step::Koreader(arg.to_string())]);
         }
@@ -235,6 +242,21 @@ mod tests {
             plan("scripts/koreader.sh next_page"),
             Some(vec![Step::Koreader("GotoViewRel/1".into())])
         );
+    }
+
+    #[test]
+    fn warmth_actions_are_planned() {
+        for (step, event) in [
+            ("1", "IncreaseFlWarmth/1"),
+            ("-1", "DecreaseFlWarmth/1"),
+            ("5", "IncreaseFlWarmth/5"),
+            ("-5", "DecreaseFlWarmth/5"),
+        ] {
+            assert_eq!(
+                plan(&format!("scripts/koreader.sh warmth {}", step)),
+                Some(vec![Step::Koreader(event.into())])
+            );
+        }
     }
 
     #[test]

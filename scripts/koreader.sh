@@ -6,6 +6,7 @@
 #   next_page        - Turn to next page
 #   prev_page        - Turn to previous page
 #   brightness <n>   - Adjust brightness (positive=up, negative=down)
+#   warmth <n>       - Adjust warmth (positive=warmer, negative=cooler)
 #   brightness_toggle - Toggle frontlight on/off
 #   night_mode       - Toggle night/dark mode
 #   font_up [n]      - Increase font size (default: 1)
@@ -44,6 +45,15 @@ case "$1" in
             send_event "DecreaseFlIntensity/${step}"
         fi
         ;;
+    warmth)
+        step="${2:-1}"
+        if [ "$step" -gt 0 ] 2>/dev/null; then
+            send_event "IncreaseFlWarmth/${step}"
+        elif [ "$step" -lt 0 ] 2>/dev/null; then
+            step=$(echo "$step" | tr -d '-')
+            send_event "DecreaseFlWarmth/${step}"
+        fi
+        ;;
     brightness_toggle)
         send_event "ToggleFrontlight"
         ;;
@@ -73,7 +83,8 @@ case "$1" in
         ;;
     *)
         echo "Usage: $0 <command> [args...]"
-        echo "Commands: next_page, prev_page, brightness <n>, brightness_toggle,"
+        echo "Commands: next_page, prev_page, brightness <n>, warmth <n>,"
+        echo "          brightness_toggle,"
         echo "          night_mode, font_up [n], font_down [n], menu, toggle_status_bar,"
         echo "          rotate, event <name> [args]"
         exit 1
