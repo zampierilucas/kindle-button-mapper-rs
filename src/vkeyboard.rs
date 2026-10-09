@@ -130,6 +130,9 @@ pub fn hold() -> Hold {
     k.idle_since = None;
     if k.dev.is_none() {
         k.dev = try_init();
+        if k.dev.is_some() {
+            crate::layout::reapply_key_repeat();
+        }
     }
     Hold(())
 }

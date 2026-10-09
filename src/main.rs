@@ -355,6 +355,9 @@ fn run_event_loop(
                         }
                     }
                     downgrade_relay(&mut fresh, grab);
+                    if let Some((delay, rate)) = fresh.key_repeat.filter(|r| cfg.key_repeat != Some(*r)) {
+                        layout::set_key_repeat(delay, rate);
+                    }
                     *mapper = Mapper::new(&fresh, settings);
                     *cfg = fresh;
                     let want = wants_keyboard(cfg, device);

@@ -2,6 +2,9 @@ use log::{info, warn};
 use std::fs;
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
+use std::thread;
+use std::time::Duration;
 
 const XKB_DIR: &str = "/usr/share/X11/xkb";
 const US: &str = "/usr/share/X11/xkb/symbols/us";
@@ -40,7 +43,24 @@ impl Drop for LayoutOverride {
     }
 }
 
+static KEY_REPEAT: Mutex<Option<(u32, u32)>> = Mutex::new(None);
+
 pub fn set_key_repeat(delay_ms: u32, rate: u32) {
+    *KEY_REPEAT.lock().unwrap_or_else(|p| p.into_inner()) = Some((delay_ms, rate));
+    xset_rate(delay_ms, rate);
+}
+
+pub fn reapply_key_repeat() {
+    let Some((delay_ms, rate)) = *KEY_REPEAT.lock().unwrap_or_else(|p| p.into_inner()) else {
+        return;
+    };
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(1));
+        xset_rate(delay_ms, rate);
+    });
+}
+
+fn xset_rate(delay_ms: u32, rate: u32) {
     let delay = delay_ms.to_string();
     let rate = rate.to_string();
     if run("xset", &["-display", ":0", "r", "rate", &delay, &rate]) {
