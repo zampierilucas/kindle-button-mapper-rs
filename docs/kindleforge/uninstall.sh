@@ -2,6 +2,9 @@
 
 set -e
 
+trap '/usr/sbin/mntroot ro 2>/dev/null' EXIT
+trap 'exit 130' INT TERM HUP
+
 INSTALL_DIR=/mnt/us/kindle-button-mapper
 APPREG_DB=/var/local/appreg.db
 APP_ID="com.lzampier.mappermanager"
