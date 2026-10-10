@@ -2,6 +2,9 @@
 
 set -e
 
+trap '/usr/sbin/mntroot ro 2>/dev/null' EXIT
+trap 'exit 130' INT TERM HUP
+
 TMPDIR=/mnt/us/KFPM-Temporary
 INSTALL_DIR=/mnt/us/kindle-button-mapper
 RELEASE_URL="https://github.com/zampierilucas/kindle-button-mapper-rs/releases/latest/download"
