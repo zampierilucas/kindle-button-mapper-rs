@@ -12,6 +12,7 @@ var MapperManager = (function() {
 
     var messageTimer = null;
     var actions = [];          // [{kind, id, label}] from /actions
+    var builtInGestures = [];
     var layouts = [];          // [{code, name}] from /layouts
     var devices = [];          // [{path, name, uniq}]
     var ini = null;            // parsed config
@@ -422,8 +423,9 @@ var MapperManager = (function() {
         var parsed = extractAction(script);
         var actionLabel = labelForAction(parsed) || parsed.id || script;
         var attrs = ' data-section="' + escapeHtml(section) + '" data-key="' + escapeHtml(key) + '"';
-        // Only a gesture carries a name the user chose, so only it can be renamed.
-        var rename = isGestureSection(section)
+        // Only a recorded gesture carries a name the user chose, so only it can
+        // be renamed. A built-in one (tap, swipe_*) has no recording to follow.
+        var rename = isGestureSection(section) && recordedSpelling(key) !== null
             ? '<button class="binding-del binding-ren"' + attrs + '>Name</button>'
             : '';
         return '<div class="binding-row"' + attrs + '>'
@@ -586,6 +588,14 @@ var MapperManager = (function() {
                     key: horizontal ? (data.value > 0 ? "right" : "left")
                                     : (data.value > 0 ? "down" : "up")
                 };
+            } else if (data.kind === "gesture") {
+                var key = recordedSpelling(data.name) || data.builtin;
+                if (!key) {
+                    continuousCapture = false;
+                    showMessage("Save first: '" + data.name + "' is only a recording in the saved config", true);
+                    return;
+                }
+                slot = { kind: "gestures", key: key };
             }
             if (!slot) { showMessage("unknown event", true); return; }
             pendingSlot = { section: devSection(slot.kind), key: slot.key };
@@ -663,13 +673,23 @@ var MapperManager = (function() {
     }
 
     // The daemon's parser folds case, so two names differing only in case are
-    // one gesture to it.
+    // one gesture to it. A built-in name is taken too: the daemon fires it
+    // without a recording.
     function gestureExists(name) {
+        for (var b = 0; b < builtInGestures.length; b++) {
+            if (builtInGestures[b] === name.toLowerCase()) return true;
+        }
+        return recordedSpelling(name) !== null;
+    }
+
+    // The spelling a recording was saved under. The daemon and the capture
+    // report it folded to lower case, and a binding has to use the same key.
+    function recordedSpelling(name) {
         var entries = ini.sections["gestures"] || [];
         for (var i = 0; i < entries.length; i++) {
-            if (entries[i][0].toLowerCase() === name.toLowerCase()) return true;
+            if (entries[i][0].toLowerCase() === name.toLowerCase()) return entries[i][0];
         }
-        return false;
+        return null;
     }
 
     function renameGesture(section, oldKey) {
@@ -868,6 +888,7 @@ var MapperManager = (function() {
     function reloadConfig() {
         getJSON("/actions", function(data, err) {
             if (data && data.actions) actions = data.actions;
+            if (data && data.gestures) builtInGestures = data.gestures;
             request("GET", "/config", null, function(text, err2) {
                 if (err2) { showMessage("Reload: " + err2, true); return; }
                 ini = parseIni(text);
@@ -1319,6 +1340,7 @@ var MapperManager = (function() {
                 return;
             }
             if (data && data.actions) actions = data.actions;
+            if (data && data.gestures) builtInGestures = data.gestures;
             request("GET", "/config", null, function(text, err2) {
                 if (err2) {
                     if (attempt < BOOT_ATTEMPTS) {

@@ -126,7 +126,7 @@ fn route(method: &str, path: &str, body: &str, config_path: &str) -> (u16, Strin
         ("GET", "/actions") => (200, actions_json()),
         ("GET", "/layouts") => (200, layouts_json()),
         ("GET", "/capture") => capture(&query, config_path),
-        ("GET", "/record-gesture") => record_gesture(&query),
+        ("GET", "/record-gesture") => record_gesture(&query, config_path),
         ("POST", "/reload") => reload_daemon(),
         ("POST", "/stop") => stop_daemon(),
         ("POST", "/start") => start_daemon(),
@@ -332,7 +332,15 @@ fn actions_json() -> String {
             )
         })
         .collect();
-    format!("{{\"ok\":true,\"actions\":[{}]}}", items.join(","))
+    let gestures = crate::gesture::Contact::ALL
+        .iter()
+        .map(|contact| format!("\"{name}\"", name = contact.name()))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"ok\":true,\"actions\":[{actions}],\"gestures\":[{gestures}]}}",
+        actions = items.join(",")
+    )
 }
 
 const XKB_RULES_LST: &str = "/usr/share/X11/xkb/rules/evdev.lst";
@@ -407,11 +415,17 @@ fn logs_text() -> String {
     }
 }
 
-fn record_gesture(query: &std::collections::HashMap<String, String>) -> (u16, String) {
+fn record_gesture(
+    query: &std::collections::HashMap<String, String>,
+    config_path: &str,
+) -> (u16, String) {
     let lock = match CAPTURE_LOCK.try_lock() {
         Ok(g) => g,
         Err(_) => return (200, json_err("capture already running")),
     };
+    let min_travel = crate::config::Config::load(config_path)
+        .unwrap_or_default()
+        .gesture_min_percent as f32;
     let path = match query.get("device") {
         Some(p) if !p.is_empty() => p.clone(),
         _ => return (200, json_err("missing device param")),
@@ -461,11 +475,11 @@ fn record_gesture(query: &std::collections::HashMap<String, String>) -> (u16, St
         for ev in events {
             match ev.kind() {
                 InputEventKind::Synchronization(_) => stroke.sync(),
-                InputEventKind::Key(k) if k.code() == 330 => {
+                InputEventKind::Key(k) if k.code() == 330 && ev.value() != 2 => {
                     if ev.value() == 1 {
                         stroke.press();
                     } else if let Some(path) = stroke.release() {
-                        if crate::gesture::travel(&path) >= 10.0 {
+                        if crate::gesture::extent(&path) > min_travel {
                             let pts = crate::gesture::normalize(&path);
                             drop(lock);
                             return (
@@ -520,7 +534,15 @@ fn capture(query: &std::collections::HashMap<String, String>, config_path: &str)
         Err(e) => return (200, json_err(&format!("open {}: {}", path, e))),
     };
     let ranges = crate::stick_ranges(&device);
-    let deadzone = crate::config::Config::load(config_path).map_or(50, |c| c.stick_deadzone);
+    let config = crate::config::Config::load(config_path).unwrap_or_default();
+    let mut contacts = crate::input::device_reports_contacts(&device, crate::is_gamepad(&device))
+        .then(|| {
+            crate::gesture::ContactTracker::new(
+                ranges.clone(),
+                &crate::WorkerSettings::from_config(&config),
+            )
+            .starting_at(crate::contact_position(&device, &ranges))
+        });
     // Non-blocking so the deadline check actually fires when the device
     // is idle. Without this the read parks forever, holding CAPTURE_LOCK.
     use nix::libc;
@@ -545,6 +567,24 @@ fn capture(query: &std::collections::HashMap<String, String>, config_path: &str)
             }
         };
         for ev in events {
+            match contacts.as_mut().map(|c| c.feed(&ev)) {
+                Some(crate::gesture::ContactEvent::Finished(named)) => {
+                    let Some(name) = named.name() else { continue };
+                    drop(lock);
+                    let builtin = named.contact().map_or("null".to_string(), |contact| {
+                        format!("\"{name}\"", name = contact.name())
+                    });
+                    return (
+                        200,
+                        format!(
+                            "{{\"ok\":true,\"kind\":\"gesture\",\"name\":\"{name}\",\"builtin\":{builtin}}}",
+                            name = esc(name)
+                        ),
+                    );
+                }
+                Some(crate::gesture::ContactEvent::Part) => continue,
+                Some(crate::gesture::ContactEvent::Other) | None => {}
+            }
             match ev.kind() {
                 InputEventKind::Key(k) => {
                     if ev.value() != 1 {
@@ -569,7 +609,11 @@ fn capture(query: &std::collections::HashMap<String, String>, config_path: &str)
                     } else {
                         ev.value()
                     };
-                    let idle = if kind == "stick" { v.abs() < deadzone } else { v == 0 };
+                    let idle = if kind == "stick" {
+                        v.abs() < config.stick_deadzone
+                    } else {
+                        v == 0
+                    };
                     if idle {
                         continue;
                     }

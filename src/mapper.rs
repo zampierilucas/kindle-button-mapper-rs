@@ -19,10 +19,6 @@ pub struct Mapper {
     stick_deadzone: i32,
     stick_pushed: HashMap<u16, bool>,
     gesture_mappings: HashMap<String, String>,
-    gesture_min_percent: i32,
-    gesture_tolerance: f32,
-    gesture_templates: Vec<(String, Vec<crate::gesture::Point>)>,
-    stroke: crate::gesture::Stroke,
     debounce_ms: u64,
     long_press_ms: u64,
     repeat_ms: u64,
@@ -65,10 +61,6 @@ impl Mapper {
             stick_deadzone: s.stick_deadzone,
             stick_pushed: HashMap::new(),
             gesture_mappings: cfg.gesture_mappings.clone(),
-            gesture_min_percent: s.gesture_min_percent,
-            gesture_tolerance: s.gesture_tolerance,
-            gesture_templates: s.gesture_templates.clone(),
-            stroke: crate::gesture::Stroke::default(),
             debounce_ms: s.debounce_ms,
             long_press_ms: s.long_press_ms,
             repeat_ms: s.repeat_ms,
@@ -344,48 +336,40 @@ impl Mapper {
         }
     }
 
-    /// Handle trigger axis event
-    /// Gas (code 9): RT - value 0 (released) to 1023 (fully pressed)
-    /// Brake (code 10): LT - value 0 (released) to 1023 (fully pressed)
-    ///
-    /// Handles controllers that send press-release-press cycles for auto-repeat.
-    pub fn handle_touch(&mut self, down: bool) {
-        if down {
-            self.stroke.press();
-            return;
-        }
-        let path = match self.stroke.release() {
-            Some(p) => p,
-            None => return,
-        };
-        if crate::gesture::travel(&path) < self.gesture_min_percent as f32 {
-            return;
-        }
-        let name = match crate::gesture::nearest(&path, &self.gesture_templates) {
-            Some((n, d)) if d <= self.gesture_tolerance => n.to_string(),
-            Some((n, d)) => {
-                info!("Gesture: no match (nearest '{}' at {:.2}, tolerance {:.2})", n, d, self.gesture_tolerance);
-                return;
+    pub fn handle_gesture(&mut self, named: &crate::gesture::Named) {
+        match (self.log_buttons, named.closest(), named.name()) {
+            (true, Some((closest, distance)), _) => {
+                info!("Gesture: no recording matched (nearest '{closest}' at {distance:.2})")
             }
-            None => {
-                info!("Gesture: no match (no gestures recorded)");
-                return;
+            (true, None, None) => info!("Gesture: moved and came back, and nothing is recorded"),
+            _ => {}
+        }
+        match (self.gesture_binding(named), named.name()) {
+            (Some((name, script)), Some(matched)) if name != matched => {
+                info!("Gesture '{name}' -> {script} (matched '{matched}', not bound here)");
+                execute_script(script);
             }
-        };
-        let script = self.gesture_mappings.get(&name).cloned();
-        info!("Gesture '{}' -> {}", name, script.as_deref().unwrap_or("[unmapped]"));
-        if let Some(script) = script {
-            execute_script(&script);
+            (Some((name, script)), _) => {
+                info!("Gesture '{name}' -> {script}");
+                execute_script(script);
+            }
+            (None, Some(_)) if self.log_buttons => info!(
+                "Gesture '{names}' [unmapped]",
+                names = named.names().collect::<Vec<_>>().join("' or '")
+            ),
+            (None, _) => {}
         }
     }
 
-    pub fn handle_touch_move(&mut self, horizontal: bool, pct: i32) {
-        self.stroke.axis(horizontal, pct);
-    }
-
-    /// End of an input report. Contact position is sampled here.
-    pub fn handle_sync(&mut self) {
-        self.stroke.sync();
+    fn gesture_binding<'a>(
+        &'a self,
+        named: &'a crate::gesture::Named,
+    ) -> Option<(&'a str, &'a str)> {
+        named.names().find_map(|name| {
+            self.gesture_mappings
+                .get(name)
+                .map(|script| (name, script.as_str()))
+        })
     }
 
     pub fn handle_stick(&mut self, axis: u16, pct: i32) {
@@ -416,6 +400,11 @@ impl Mapper {
         }
     }
 
+    /// Handle trigger axis event
+    /// Gas (code 9): RT - value 0 (released) to 1023 (fully pressed)
+    /// Brake (code 10): LT - value 0 (released) to 1023 (fully pressed)
+    ///
+    /// Handles controllers that send press-release-press cycles for auto-repeat.
     pub fn handle_trigger(&mut self, axis: u16, value: i32) {
         let trigger = match axis {
             9 => Trigger::RT,   // Gas = Right Trigger
@@ -543,6 +532,28 @@ mod tests {
         let mut m = mapper(false, &[30]);
         assert!(!m.relay(Key::new(30), 1));
         assert!(!m.relay(Key::new(31), 1));
+    }
+
+    #[test]
+    fn a_recording_this_device_does_not_bind_fires_its_swipe() {
+        use crate::gesture::{Contact, Named};
+        let mut cfg = DeviceConfig::for_test("ring");
+        cfg.gesture_mappings
+            .insert("swipe_left".into(), "/bin/true".into());
+        let flick = Named::Recorded("flick".into(), Some(Contact::SwipeLeft));
+        let came_back = Named::Recorded("circle".into(), None);
+
+        let ring = Mapper::new(&cfg, &test_settings());
+        assert_eq!(
+            ring.gesture_binding(&flick),
+            Some(("swipe_left", "/bin/true"))
+        );
+        assert_eq!(ring.gesture_binding(&came_back), None);
+
+        cfg.gesture_mappings
+            .insert("flick".into(), "/bin/false".into());
+        let ring = Mapper::new(&cfg, &test_settings());
+        assert_eq!(ring.gesture_binding(&flick), Some(("flick", "/bin/false")));
     }
 
     #[test]
