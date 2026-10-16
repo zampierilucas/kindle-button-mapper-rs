@@ -32,6 +32,16 @@ pub fn mappable_keys(keys: Option<&AttributeSetRef<Key>>, mouse: bool) -> usize 
     })
 }
 
+/// A kernel that splits a device per HID application gives every node the
+/// same uniq, so the configured name tells apart the node that was picked,
+/// unless that node has nothing to bind.
+fn node_rank(node_name: &str, wanted_name: Option<&str>, keys: usize) -> (bool, usize) {
+    (
+        keys > 0 && wanted_name.is_some_and(|wanted| !wanted.is_empty() && node_name == wanted),
+        keys,
+    )
+}
+
 pub struct InputHandler {
     device_name: Option<String>,
     device_uniq: Option<String>,
@@ -55,11 +65,7 @@ impl InputHandler {
     }
 
     pub fn open(&self) -> Result<(Device, bool), String> {
-        let has_identity = self.device_uniq.as_deref().is_some_and(|u| !u.is_empty())
-            || self.device_name.as_deref().is_some_and(|n| !n.is_empty());
-        if !has_identity {
-            return Err("No device name or uniq specified".to_string());
-        }
+        self.require_identity()?;
 
         if let Some(dev) = self.scan_for_device()? {
             return self.finish_open(dev);
@@ -68,6 +74,21 @@ impl InputHandler {
         info!("Waiting for device to appear...");
         let dev = self.wait_for_matching_device()?;
         self.finish_open(dev)
+    }
+
+    /// The node `open` would read now, for a frontend that must listen on the
+    /// same one.
+    pub fn node_path(&self) -> Result<Option<PathBuf>, String> {
+        self.require_identity()?;
+        Ok(self.best_node()?.map(|(path, _)| path))
+    }
+
+    fn require_identity(&self) -> Result<(), String> {
+        let has_identity = self.device_uniq.as_deref().is_some_and(|u| !u.is_empty())
+            || self.device_name.as_deref().is_some_and(|n| !n.is_empty());
+        has_identity
+            .then_some(())
+            .ok_or_else(|| "No device name or uniq specified".to_string())
     }
 
     fn matches_device(&self, dev: &Device) -> bool {
@@ -90,10 +111,17 @@ impl InputHandler {
     }
 
     fn scan_for_device(&self) -> Result<Option<Device>, String> {
+        Ok(self.best_node()?.map(|(path, dev)| {
+            info!("Found device at {path}", path = path.display());
+            dev
+        }))
+    }
+
+    fn best_node(&self) -> Result<Option<(PathBuf, Device)>, String> {
         let entries = fs::read_dir(INPUT_DIR)
             .map_err(|e| format!("Cannot open {}: {}", INPUT_DIR, e))?;
 
-        let mut best: Option<(usize, PathBuf, Device)> = None;
+        let mut best: Option<((bool, usize), PathBuf, Device)> = None;
 
         for entry in entries.flatten() {
             let path = entry.path();
@@ -111,9 +139,15 @@ impl InputHandler {
                         continue;
                     }
                     let keys = mappable_keys(dev.supported_keys(), self.mouse);
-                    debug!("{} matches, {} mappable keys", path.display(), keys);
-                    if best.as_ref().is_none_or(|(most, _, _)| keys > *most) {
-                        best = Some((keys, path, dev));
+                    let rank =
+                        node_rank(dev.name().unwrap_or(""), self.device_name.as_deref(), keys);
+                    debug!(
+                        "{path} matches, {keys} mappable keys, picked by name: {named}",
+                        path = path.display(),
+                        named = rank.0
+                    );
+                    if best.as_ref().is_none_or(|(top, _, _)| rank > *top) {
+                        best = Some((rank, path, dev));
                     }
                 }
                 Err(e) => {
@@ -121,10 +155,7 @@ impl InputHandler {
                 }
             }
         }
-        Ok(best.map(|(_, path, dev)| {
-            info!("Found device at {}", path.display());
-            dev
-        }))
+        Ok(best.map(|(_, path, dev)| (path, dev)))
     }
 
     fn wait_for_matching_device(&self) -> Result<Device, String> {
@@ -211,8 +242,50 @@ impl InputHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::{mappable_keys, uniq_matches};
+    use super::{mappable_keys, node_rank, uniq_matches};
     use evdev::{AttributeSet, Key};
+
+    #[test]
+    fn the_named_node_wins_among_nodes_that_share_an_address() {
+        // An F3 ring on 5.15: one node per HID application, both with its address.
+        let touchscreen = AttributeSet::from_iter([Key::BTN_TOUCH, Key::BTN_TOOL_PEN, Key::BTN_0]);
+        let consumer = AttributeSet::from_iter([
+            Key::KEY_VOLUMEUP,
+            Key::KEY_VOLUMEDOWN,
+            Key::KEY_MUTE,
+            Key::KEY_PLAYPAUSE,
+            Key::KEY_NEXTSONG,
+            Key::KEY_PREVIOUSSONG,
+        ]);
+        let rank = |name: &str, wanted: Option<&str>, keys: &AttributeSet<Key>| {
+            node_rank(name, wanted, mappable_keys(Some(keys), false))
+        };
+        let picked = |wanted| {
+            rank("F3 Touchscreen", wanted, &touchscreen)
+                > rank("F3 Consumer Control", wanted, &consumer)
+        };
+
+        assert!(picked(Some("F3 Touchscreen")));
+        // No name, or one that no longer matches after a rename: most keys wins.
+        assert!(!picked(None));
+        assert!(!picked(Some("")));
+        assert!(!picked(Some("Page Turner")));
+    }
+
+    #[test]
+    fn a_named_node_with_nothing_to_bind_still_loses() {
+        // A PW12 lists a Keyboard and a Mouse node under one address.
+        let keyboard = AttributeSet::from_iter([Key::KEY_A, Key::KEY_PAGEUP, Key::KEY_PAGEDOWN]);
+        let pointer = AttributeSet::from_iter([Key::BTN_LEFT, Key::BTN_RIGHT, Key::BTN_MIDDLE]);
+        let keyboard_picked = |wanted, mouse| {
+            node_rank("R Keyboard", wanted, mappable_keys(Some(&keyboard), mouse))
+                > node_rank("R Mouse", wanted, mappable_keys(Some(&pointer), mouse))
+        };
+
+        assert!(keyboard_picked(Some("R Mouse"), false));
+        assert!(!keyboard_picked(Some("R Keyboard"), true));
+        assert!(!keyboard_picked(Some("R Mouse"), true));
+    }
 
     #[test]
     fn a_mouse_node_loses_to_the_keyboard_node() {

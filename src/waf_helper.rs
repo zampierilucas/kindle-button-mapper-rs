@@ -122,6 +122,7 @@ fn route(method: &str, path: &str, body: &str, config_path: &str) -> (u16, Strin
             Err(e) => (500, json_err(&format!("write failed: {}", e))),
         },
         ("GET", "/devices") => (200, devices_json()),
+        ("GET", "/resolve") => resolve(&query),
         ("GET", "/actions") => (200, actions_json()),
         ("GET", "/layouts") => (200, layouts_json()),
         ("GET", "/capture") => capture(&query, config_path),
@@ -301,6 +302,22 @@ fn devices_json() -> String {
         .map(|(p, n, u, _)| format!("{{\"path\":\"{}\",\"name\":\"{}\",\"uniq\":\"{}\"}}", esc(p), esc(n), esc(u)))
         .collect();
     format!("{{\"ok\":true,\"devices\":[{}]}}", items.join(","))
+}
+
+fn resolve(query: &std::collections::HashMap<String, String>) -> (u16, String) {
+    let param = |key: &str| query.get(key).filter(|value| !value.is_empty()).cloned();
+    let mouse = query.get("mouse").is_some_and(|value| value == "true");
+    match crate::input::InputHandler::new(param("name"), param("uniq"), false, mouse).node_path() {
+        Ok(Some(path)) => (
+            200,
+            format!(
+                "{{\"ok\":true,\"path\":\"{path}\"}}",
+                path = esc(&path.display().to_string())
+            ),
+        ),
+        Ok(None) => (200, json_err("Device not connected")),
+        Err(e) => (200, json_err(&e)),
+    }
 }
 
 fn actions_json() -> String {
