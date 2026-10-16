@@ -542,31 +542,13 @@ var MapperManager = (function() {
     }
 
     function resolveDevicePath(id, cb) {
-        var uniq = bareUniq(getValue("device." + id, "uniq") || "");
-        var name = getValue("device." + id, "name") || "";
-        getJSON("/devices", function(data, err) {
+        var section = "device." + id;
+        var mouse = (getValue(section, "type") || "").toLowerCase() === "mouse";
+        getJSON("/resolve?name=" + encodeURIComponent(getValue(section, "name") || "")
+            + "&uniq=" + encodeURIComponent(getValue(section, "uniq") || "")
+            + "&mouse=" + mouse, function(data, err) {
             if (err) { cb(null, "Devices: " + err); return; }
-            var list = data.devices || [];
-            var match = null;
-            for (var i = 0; i < list.length; i++) {
-                if (uniq && bareUniq(list[i].uniq || "") === uniq) {
-                    match = list[i];
-                    break;
-                }
-            }
-            if (!match && name) {
-                for (var j = 0; j < list.length; j++) {
-                    if (list[j].name === name) {
-                        match = list[j];
-                        break;
-                    }
-                }
-            }
-            if (match) {
-                cb(match.path, null);
-            } else {
-                cb(null, "Device not connected");
-            }
+            if (data.ok) { cb(data.path, null); } else { cb(null, data.error); }
         });
     }
 
