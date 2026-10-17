@@ -79,6 +79,16 @@ impl DeviceConfig {
         info!("[{}] no mappings configured, using the default gamepad layout", self.id);
     }
 
+    /// Bindings that reading the node as a touch device leaves unreachable:
+    /// the contact's own keys, and the stick its axes no longer drive.
+    pub fn contact_shadowed(&self) -> bool {
+        self.mappings
+            .keys()
+            .chain(self.long_press_mappings.keys())
+            .any(|&key| key == Key::BTN_TOUCH || crate::gesture::is_tool(key))
+            || !self.stick_left_mappings.is_empty()
+    }
+
     pub fn is_unmapped(&self) -> bool {
         self.scripts().next().is_none()
     }
@@ -475,6 +485,25 @@ mod tests {
         assert!(by("mouse").mouse);
         assert!(!by("pad").mouse);
         assert!(!by("kbd").mouse);
+    }
+
+    #[test]
+    fn bindings_made_for_a_btn_touch_remote_as_keys_or_a_stick_are_shadowed() {
+        let k02 = |section: &str, key: &str| {
+            load_str(
+                &format!("kbm-shadow-{section}-{key}.ini"),
+                &format!(
+                    "[device.k02]\nuniq = AA:BB\n\n[device.k02.{section}]\n{key} = /bin/true\n"
+                ),
+            )
+            .devices
+            .remove(0)
+        };
+        assert!(k02("buttons", "330").contact_shadowed());
+        assert!(k02("longpress", "320").contact_shadowed());
+        assert!(k02("stick_left", "right").contact_shadowed());
+        assert!(!k02("buttons", "115").contact_shadowed());
+        assert!(!k02("gestures", "swipe_right").contact_shadowed());
     }
 
     #[test]

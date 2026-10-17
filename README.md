@@ -8,7 +8,7 @@ A Rust-based Linux input device event mapper for Kindle e-readers. Maps button p
 - Page turns and reader controls for both the native Kindle reader and KOReader
 - Long press support with separate actions
 - Auto-repeat when buttons are held
-- Recorded stick/touch gestures, bound by name
+- Touch gestures bound by name, recorded or built in (tap and four swipes), so remotes that emulate a touchscreen work as page turners
 - Debouncing to prevent double-triggers
 - Auto-reconnect on device disconnect
 - Optional exclusive device grab
@@ -108,11 +108,15 @@ grab = true
 
 [device.gamepad.gestures]
 # gesture_name = /path/to/script.sh
+# tap / swipe_left / swipe_right / swipe_up / swipe_down = /path/to/script.sh
 ```
 
 Devices are matched by identity, never by `/dev/input/eventX` path (that index is
 unstable across reconnects): the mapper uses the Bluetooth MAC (`uniq`) when set,
-otherwise the device `name`. Set at least one.
+otherwise the device `name`. Set at least one. When several nodes share a MAC, as
+when the kernel splits a remote per HID application, it reads the one called
+`name` if that one has keys to bind, otherwise the one with the most keys, and
+Capture listens on the same node.
 
 Set `keyboard_layout` to an XKB layout code (e.g. `fr`, `de`, `ro`, `fr(oss)`) to type correctly on a non-US Bluetooth keyboard. The reader re-pins the `us` core keymap on every focus and `/usr/share/X11/xkb` is read-only, so the mapper bind-mounts a generated `us` symbols file over the system one; every re-pin then resolves to your layout, reverted when the daemon stops. Give a comma list for an Alt+Shift toggle (`us,ru`); it's a system-wide override taken from the first device that sets one. Leave it unset to keep the system default.
 
@@ -159,10 +163,33 @@ Use `log_buttons = true` to discover button codes for your device.
 
 Gestures are recorded once — the *Record gesture* button in MapperManager writes
 the captured movement into `[gestures]` — and then bound by name per device. A
-movement shorter than `gesture_min_percent` of the axis range is treated as a
-tap, not a gesture. `gesture_tolerance` sets how closely a movement must match a
-recorded one to fire: lower is stricter, raise it if your gestures don't trigger
-reliably.
+contact that never gets further than `gesture_min_percent` from where it landed,
+in percent of half an axis, fires as `tap`. `gesture_tolerance` sets how closely
+a movement must match a recorded one to fire: lower is stricter, raise it if your
+gestures don't trigger reliably.
+
+A contact that matches no recording still fires by its built-in name: `tap`, or
+`swipe_left`, `swipe_right`, `swipe_up` or `swipe_down` for the way it mostly
+moved, with down towards the larger Y. One that moved and came back to where it
+landed has no built-in name, and fires only a recording it matches. Recordings
+are shared by every device, so a contact that matches one this device doesn't
+bind fires its built-in name instead, if it has one. This is what makes remotes
+that emulate a touchscreen usable without recording anything. Page-turner rings and similar remotes report each button
+press as a short swipe or a tap, and *Capture* in MapperManager binds the press
+by that name. The name follows the stroke the remote sends, not the label on its
+button, so a ring's "up" button can be a `swipe_left`; Capture shows which.
+
+Any device that reports `BTN_TOUCH` together with `ABS_X`/`ABS_Y` and is not a
+gamepad is read this way. Bindings made for one before this, as `buttons` 330
+or 320 or as `stick_left` directions, no longer fire: capture those presses
+again.
+
+A kernel that splits a remote per HID application lists it more than once under
+*Available on /dev/input*: an F3 ring shows up as **F3 Touchscreen** and **F3
+Consumer Control**. Add the one that sends the presses you want, the
+Touchscreen for the ring's up and down buttons. The Consumer Control only
+carries its C-mode centre button, which sends volume up (115) and volume down
+(114) on alternate presses: add it as a second device and bind both codes.
 
 ### Reader actions
 
