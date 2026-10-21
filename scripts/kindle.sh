@@ -12,6 +12,7 @@
 #   toolbar           - Toggle the reader toolbar
 #   brightness <n>    - Adjust frontlight (positive=up, negative=down)
 #   brightness_toggle - Toggle frontlight off/on
+#   dark_mode_toggle  - Toggle kindle system dark mode for the device
 #   suspend           - Put the device to sleep
 #
 # Page turns are handed to the daemon, which injects into the physical page
@@ -101,6 +102,15 @@ case "$1" in
             fl_set "$prev"
         fi
         ;;
+    dark_mode_toggle)
+        mode=$(lipc-get-prop com.lab126.winmgr epdcMode 2>/dev/null) \
+            || { warn "dark_mode_toggle: winmgr not reachable"; exit 1; }
+        if [ "$mode" = "Y8INV" ]; then
+            lipc-set-prop com.lab126.winmgr epdcMode Y8 2>/dev/null
+        else
+            lipc-set-prop com.lab126.winmgr epdcMode Y8INV 2>/dev/null
+        fi || warn "dark_mode_toggle: cannot set epdcMode"
+        ;;
     suspend)
         # powerButton is a toggle and a held button repeats its action, so
         # calls within 2s of the last are dropped: one press, one transition.
@@ -117,7 +127,7 @@ case "$1" in
         echo "Usage: $0 <command> [args...]"
         echo "Commands: next_page, prev_page, next_page_tap, prev_page_tap,"
         echo "          home, back, toolbar,"
-        echo "          brightness <n>, brightness_toggle, suspend"
+        echo "          brightness <n>, brightness_toggle, dark_mode_toggle, suspend"
         exit 1
         ;;
 esac
