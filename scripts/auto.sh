@@ -9,6 +9,7 @@
 #   prev_page_tap     - Previous page, tapping the screen on the native reader
 #   brightness <n>    - Adjust frontlight (positive=up, negative=down)
 #   brightness_toggle - Toggle frontlight off/on
+#   dark_mode_toggle  - KOReader night mode, native system dark mode
 #   menu              - KOReader menu, native toolbar
 #
 # KOReader answers on its HTTP Inspector port when it is up, so a delivered
@@ -26,7 +27,7 @@ try_koreader() {
 
 CMD="$1"
 case "$CMD" in
-    next_page|prev_page|brightness|brightness_toggle|night_mode|font_up|font_down|toggle_status_bar|rotate)
+    next_page|prev_page|brightness|brightness_toggle|font_up|font_down|toggle_status_bar|rotate)
         try_koreader "$@" && exit 0
         ;;
     next_page_tap)
@@ -35,6 +36,10 @@ case "$CMD" in
     prev_page_tap)
         try_koreader prev_page && exit 0
         ;;
+    dark_mode_toggle|night_mode)
+        try_koreader night_mode && exit 0
+        exec "$DIR/kindle.sh" dark_mode_toggle
+        ;;
     menu)
         try_koreader menu && exit 0
         exec "$DIR/kindle.sh" toolbar
@@ -42,7 +47,7 @@ case "$CMD" in
     "")
         echo "Usage: $0 <command> [args...]"
         echo "Commands: next_page, prev_page, next_page_tap, prev_page_tap,"
-        echo "          brightness <n>, brightness_toggle, menu"
+        echo "          brightness <n>, brightness_toggle, dark_mode_toggle, menu"
         exit 1
         ;;
 esac

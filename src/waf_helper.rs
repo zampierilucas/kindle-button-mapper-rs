@@ -29,6 +29,7 @@ const ACTIONS: &[(&str, &str, &str)] = &[
     ("auto", "brightness 5", "Brightness +5"),
     ("auto", "brightness -5", "Brightness -5"),
     ("auto", "brightness_toggle", "Toggle frontlight"),
+    ("auto", "dark_mode_toggle", "Toggle dark mode"),
     ("kindle", "next_page", "Next page"),
     ("kindle", "prev_page", "Previous page"),
     ("kindle", "next_page_tap", "Next page (tap)"),
