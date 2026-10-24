@@ -210,7 +210,8 @@ fn device_worker(mut cfg: config::DeviceConfig, mut settings: WorkerSettings) {
     let mut generation = reload::generation();
 
     loop {
-        let handler = InputHandler::new(cfg.name.clone(), cfg.uniq.clone(), cfg.grab, cfg.mouse);
+        let handler = InputHandler::new(cfg.name.clone(), cfg.uniq.clone(), cfg.grab, cfg.mouse)
+            .with_position(cfg.binds_position());
         match handler.open() {
             Ok((mut device, grabbed_at_open)) => {
                 // Only the opened node says whether this is a pad or a
@@ -314,10 +315,7 @@ fn run_event_loop(
     // Non-blocking + poll so we can notice a capture pause while idle.
     set_nonblocking(device.as_raw_fd());
     let ranges = stick_ranges(device);
-    let touch_device = device.properties().contains(evdev::PropType::DIRECT)
-        || device
-            .supported_absolute_axes()
-            .is_some_and(|a| a.contains(evdev::AbsoluteAxisType::ABS_MT_POSITION_X));
+    let touch_device = input::is_touchscreen(device);
     let mut grab = grab;
     let mut grabbed = grab;
     let mut keyboard = wants_keyboard(cfg, device).then(vkeyboard::hold);

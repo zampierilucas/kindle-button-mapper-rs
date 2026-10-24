@@ -79,6 +79,12 @@ impl DeviceConfig {
         info!("[{}] no mappings configured, using the default gamepad layout", self.id);
     }
 
+    pub fn binds_position(&self) -> bool {
+        !self.stick_left_mappings.is_empty()
+            || !self.stick_right_mappings.is_empty()
+            || !self.gesture_mappings.is_empty()
+    }
+
     pub fn is_unmapped(&self) -> bool {
         self.scripts().next().is_none()
     }

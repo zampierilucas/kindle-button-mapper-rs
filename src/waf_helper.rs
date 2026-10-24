@@ -1,4 +1,4 @@
-use evdev::{Device, InputEventKind};
+use evdev::{Device, InputEventKind, Key};
 use log::{error, info, warn};
 use std::fs;
 use std::cmp::Ordering;
@@ -124,6 +124,7 @@ fn route(method: &str, path: &str, body: &str, config_path: &str) -> (u16, Strin
             Err(e) => (500, json_err(&format!("write failed: {}", e))),
         },
         ("GET", "/devices") => (200, devices_json()),
+        ("GET", "/resolve") => resolve(&query),
         ("GET", "/actions") => (200, actions_json()),
         ("GET", "/layouts") => (200, layouts_json()),
         ("GET", "/capture") => capture(&query, config_path),
@@ -305,6 +306,31 @@ fn devices_json() -> String {
     format!("{{\"ok\":true,\"devices\":[{}]}}", items.join(","))
 }
 
+fn resolve(query: &std::collections::HashMap<String, String>) -> (u16, String) {
+    match resolve_handler(query).node_paths() {
+        Ok(paths) if paths.is_empty() => (200, json_err("Device not connected")),
+        Ok(paths) => (
+            200,
+            format!(
+                "{{\"ok\":true,\"paths\":[{paths}]}}",
+                paths = paths
+                    .iter()
+                    .map(|path| format!("\"{path}\"", path = esc(&path.display().to_string())))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        ),
+        Err(e) => (200, json_err(&e)),
+    }
+}
+
+fn resolve_handler(
+    query: &std::collections::HashMap<String, String>,
+) -> crate::input::InputHandler {
+    let param = |key: &str| query.get(key).filter(|value| !value.is_empty()).cloned();
+    crate::input::InputHandler::new(param("name"), param("uniq"), false, false)
+}
+
 fn actions_json() -> String {
     let items: Vec<String> = ACTIONS
         .iter()
@@ -397,7 +423,7 @@ fn record_gesture(query: &std::collections::HashMap<String, String>) -> (u16, St
         Ok(g) => g,
         Err(_) => return (200, json_err("capture already running")),
     };
-    let path = match query.get("device") {
+    let paths = match query.get("device") {
         Some(p) if !p.is_empty() => p.clone(),
         _ => return (200, json_err("missing device param")),
     };
@@ -411,45 +437,41 @@ fn record_gesture(query: &std::collections::HashMap<String, String>) -> (u16, St
     let _ = crate::pause::begin();
     std::thread::sleep(Duration::from_millis(300));
 
-    let mut device = match evdev::Device::open(&path) {
-        Ok(d) => d,
+    let mut nodes = match open_nodes(&paths) {
+        Ok(nodes) => nodes,
         Err(e) => {
             drop(lock);
-            return (200, json_err(&format!("open {}: {}", path, e)));
+            return (200, json_err(&e));
         }
     };
 
-    let ranges = crate::stick_ranges(&device);
-    use nix::libc;
-    use std::os::unix::io::AsRawFd;
-    unsafe {
-        let fd = device.as_raw_fd();
-        let flags = libc::fcntl(fd, libc::F_GETFL, 0);
-        libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
-    }
+    let ranges: Vec<_> = nodes.iter().map(crate::stick_ranges).collect();
 
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-    let mut stroke = crate::gesture::Stroke::default();
+    let mut strokes: Vec<crate::gesture::Stroke> = nodes
+        .iter()
+        .map(|_| crate::gesture::Stroke::default())
+        .collect();
 
     while Instant::now() < deadline {
-        let events = match device.fetch_events() {
-            Ok(e) => e,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+        let events = match fetch_all(&mut nodes) {
+            Ok(events) if events.is_empty() => {
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
             }
+            Ok(events) => events,
             Err(e) => {
                 drop(lock);
                 return (200, json_err(&format!("read: {}", e)));
             }
         };
-        for ev in events {
+        for (node, ev) in events {
             match ev.kind() {
-                InputEventKind::Synchronization(_) => stroke.sync(),
+                InputEventKind::Synchronization(_) => strokes[node].sync(),
                 InputEventKind::Key(k) if k.code() == 330 => {
                     if ev.value() == 1 {
-                        stroke.press();
-                    } else if let Some(path) = stroke.release() {
+                        strokes[node].press();
+                    } else if let Some(path) = strokes[node].release() {
                         if crate::gesture::travel(&path) >= 10.0 {
                             let pts = crate::gesture::normalize(&path);
                             drop(lock);
@@ -466,9 +488,11 @@ fn record_gesture(query: &std::collections::HashMap<String, String>) -> (u16, St
                 InputEventKind::AbsAxis(axis) => {
                     let code = axis.0;
                     if code == 0 || code == 53 {
-                        stroke.axis(true, crate::stick_percent(&ranges, code, ev.value()));
+                        strokes[node]
+                            .axis(true, crate::stick_percent(&ranges[node], code, ev.value()));
                     } else if code == 1 || code == 54 {
-                        stroke.axis(false, crate::stick_percent(&ranges, code, ev.value()));
+                        strokes[node]
+                            .axis(false, crate::stick_percent(&ranges[node], code, ev.value()));
                     }
                 }
                 _ => {}
@@ -484,7 +508,7 @@ fn capture(query: &std::collections::HashMap<String, String>, config_path: &str)
         Ok(g) => g,
         Err(_) => return (200, json_err("capture already running")),
     };
-    let path = match query.get("device") {
+    let paths = match query.get("device") {
         Some(p) if !p.is_empty() => p.clone(),
         _ => return (200, json_err("missing device param")),
     };
@@ -500,37 +524,34 @@ fn capture(query: &std::collections::HashMap<String, String>, config_path: &str)
     let _ = crate::pause::begin();
     std::thread::sleep(Duration::from_millis(300));
 
-    let mut device = match Device::open(&path) {
-        Ok(d) => d,
-        Err(e) => return (200, json_err(&format!("open {}: {}", path, e))),
+    let mut nodes = match open_nodes(&paths) {
+        Ok(nodes) => nodes,
+        Err(e) => return (200, json_err(&e)),
     };
-    let ranges = crate::stick_ranges(&device);
+    let ranges: Vec<_> = nodes.iter().map(crate::stick_ranges).collect();
+    let contacts: Vec<bool> = nodes.iter().map(reports_contacts).collect();
+    let mut touching = vec![false; nodes.len()];
     let deadzone = crate::config::Config::load(config_path).map_or(50, |c| c.stick_deadzone);
-    // Non-blocking so the deadline check actually fires when the device
-    // is idle. Without this the read parks forever, holding CAPTURE_LOCK.
-    use nix::libc;
-    use std::os::unix::io::AsRawFd;
-    unsafe {
-        let fd = device.as_raw_fd();
-        let flags = libc::fcntl(fd, libc::F_GETFL, 0);
-        libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
-    }
 
     let deadline = Instant::now() + Duration::from_millis(timeout_ms);
     while Instant::now() < deadline {
-        let events = match device.fetch_events() {
-            Ok(e) => e,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+        let events = match fetch_all(&mut nodes) {
+            Ok(events) if events.is_empty() => {
                 std::thread::sleep(Duration::from_millis(20));
                 continue;
             }
+            Ok(events) => events,
             Err(e) => {
                 drop(lock);
                 return (200, json_err(&format!("read: {}", e)));
             }
         };
-        for ev in events {
+        for (node, ev) in events {
             match ev.kind() {
+                InputEventKind::Key(Key::BTN_TOUCH) if contacts[node] => {
+                    touching[node] = ev.value() != 0;
+                }
+                InputEventKind::Key(k) if contacts[node] && (touching[node] || is_tool(k)) => {}
                 InputEventKind::Key(k) => {
                     if ev.value() != 1 {
                         continue;
@@ -550,7 +571,7 @@ fn capture(query: &std::collections::HashMap<String, String>, config_path: &str)
                         _ => continue,
                     };
                     let v = if kind == "stick" {
-                        crate::stick_percent(&ranges, code, ev.value())
+                        crate::stick_percent(&ranges[node], code, ev.value())
                     } else {
                         ev.value()
                     };
@@ -573,6 +594,68 @@ fn capture(query: &std::collections::HashMap<String, String>, config_path: &str)
     }
     drop(lock);
     (200, json_err("timeout"))
+}
+
+/// A remote that reports its buttons as contacts, BTN_TOUCH next to ABS_X and
+/// ABS_Y on a node that is no touchscreen (like an F3 ring), tells them apart
+/// by the contact's motion alone: its tool keys, and the keys that go down
+/// with a contact, BTN_TOUCH among them, are the same for every button.
+fn reports_contacts(device: &Device) -> bool {
+    device
+        .supported_keys()
+        .is_some_and(|keys| keys.contains(Key::BTN_TOUCH))
+        && crate::input::reports_position(device.supported_absolute_axes())
+        && !crate::input::is_touchscreen(device)
+}
+
+fn is_tool(key: Key) -> bool {
+    matches!(
+        key,
+        Key::BTN_TOOL_PEN
+            | Key::BTN_TOOL_RUBBER
+            | Key::BTN_TOOL_BRUSH
+            | Key::BTN_TOOL_PENCIL
+            | Key::BTN_TOOL_AIRBRUSH
+            | Key::BTN_TOOL_FINGER
+            | Key::BTN_TOOL_MOUSE
+            | Key::BTN_TOOL_LENS
+            | Key::BTN_TOOL_QUINTTAP
+            | Key::BTN_TOOL_DOUBLETAP
+            | Key::BTN_TOOL_TRIPLETAP
+            | Key::BTN_TOOL_QUADTAP
+    )
+}
+
+// Non-blocking so the deadline check actually fires when the device
+// is idle. Without this the read parks forever, holding CAPTURE_LOCK.
+fn open_nodes(paths: &str) -> Result<Vec<Device>, String> {
+    use std::os::unix::io::AsRawFd;
+    let nodes: Vec<Device> = paths
+        .split(',')
+        .filter_map(|path| {
+            Device::open(path)
+                .inspect_err(|e| warn!("Capture skips {path}: {e}"))
+                .ok()
+        })
+        .inspect(|device| crate::set_nonblocking(device.as_raw_fd()))
+        .collect();
+    (!nodes.is_empty())
+        .then_some(nodes)
+        .ok_or_else(|| format!("cannot open {paths}"))
+}
+
+fn fetch_all(nodes: &mut [Device]) -> std::io::Result<Vec<(usize, evdev::InputEvent)>> {
+    nodes
+        .iter_mut()
+        .enumerate()
+        .try_fold(Vec::new(), |mut events, (node, device)| {
+            match device.fetch_events() {
+                Ok(fetched) => events.extend(fetched.map(|event| (node, event))),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) => return Err(e),
+            }
+            Ok(events)
+        })
 }
 
 // The daemon runs as an upstart service, which — unlike the old SysV init
@@ -671,7 +754,30 @@ fn esc(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::sort_nodes;
+    use super::{resolve_handler, sort_nodes, split_query};
+    use crate::input::InputHandler;
+
+    #[test]
+    fn resolve_reads_a_section_the_way_mapper_manager_sends_it() {
+        // resolveDevicePath's query, encoded by encodeURIComponent.
+        let resolved = |url| resolve_handler(&split_query(url).1);
+
+        assert_eq!(
+            resolved("/resolve?name=F3%20Touchscreen&uniq=EB%3A80%3A03%3A88%3A70%3A8B"),
+            InputHandler::new(
+                Some("F3 Touchscreen".to_string()),
+                Some("EB:80:03:88:70:8B".to_string()),
+                false,
+                false,
+            )
+        );
+        // An unset field is no identity at all, so node_paths refuses it
+        // rather than listing every node.
+        assert_eq!(
+            resolved("/resolve?name=&uniq="),
+            InputHandler::new(None, None, false, false)
+        );
+    }
 
     #[test]
     fn a_stick_that_centres_off_zero_still_names_both_directions() {
