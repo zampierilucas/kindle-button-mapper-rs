@@ -112,7 +112,15 @@ grab = true
 
 Devices are matched by identity, never by `/dev/input/eventX` path (that index is
 unstable across reconnects): the mapper uses the Bluetooth MAC (`uniq`) when set,
-otherwise the device `name`. Set at least one.
+otherwise the device `name`. Set at least one. When several nodes share a MAC, as
+when the kernel splits a remote per HID application, a device that binds stick
+directions or gestures reads the node that reports a position, and any other
+reads the node with the most keys. Keys on another node then need a second
+device section with only those keys. A device that already has bindings moves
+to another node when it next connects. Capture and Record
+gesture listen on all of a device's nodes. On a remote that reports each button
+as a short touch (`BTN_TOUCH` with `ABS_X`/`ABS_Y`), like the FiKavi F3 ring,
+Capture binds the stick direction a press moves in.
 
 Set `keyboard_layout` to an XKB layout code (e.g. `fr`, `de`, `ro`, `fr(oss)`) to type correctly on a non-US Bluetooth keyboard. The reader re-pins the `us` core keymap on every focus and `/usr/share/X11/xkb` is read-only, so the mapper bind-mounts a generated `us` symbols file over the system one; every re-pin then resolves to your layout, reverted when the daemon stops. Give a comma list for an Alt+Shift toggle (`us,ru`); it's a system-wide override taken from the first device that sets one. Leave it unset to keep the system default.
 

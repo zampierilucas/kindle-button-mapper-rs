@@ -1,4 +1,4 @@
-use evdev::{AttributeSetRef, Device, Key};
+use evdev::{AbsoluteAxisType, AttributeSetRef, Device, Key, PropType};
 use log::{debug, info, warn};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use std::os::fd::AsFd;
@@ -32,11 +32,46 @@ pub fn mappable_keys(keys: Option<&AttributeSetRef<Key>>, mouse: bool) -> usize 
     })
 }
 
+pub fn reports_position(axes: Option<&AttributeSetRef<AbsoluteAxisType>>) -> bool {
+    axes.is_some_and(|axes| {
+        (axes.contains(AbsoluteAxisType::ABS_X) && axes.contains(AbsoluteAxisType::ABS_Y))
+            || axes.contains(AbsoluteAxisType::ABS_MT_POSITION_X)
+    })
+}
+
+pub fn is_touchscreen(device: &Device) -> bool {
+    device.properties().contains(PropType::DIRECT)
+        || device
+            .supported_absolute_axes()
+            .is_some_and(|a| a.contains(AbsoluteAxisType::ABS_MT_POSITION_X))
+}
+
+/// A kernel that splits a device per HID application gives every node the
+/// same uniq, and stick directions and gestures only come from a node that
+/// reports a position. Fields compare in order, so serving the section's
+/// position bindings outranks any number of keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct NodeRank {
+    serves_position_bindings: bool,
+    mappable_keys: usize,
+}
+
+impl NodeRank {
+    fn new(binds_position: bool, position: bool, mappable_keys: usize) -> Self {
+        Self {
+            serves_position_bindings: binds_position && position,
+            mappable_keys,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct InputHandler {
     device_name: Option<String>,
     device_uniq: Option<String>,
     grab: bool,
     mouse: bool,
+    binds_position: bool,
 }
 
 impl InputHandler {
@@ -51,15 +86,19 @@ impl InputHandler {
             device_uniq,
             grab,
             mouse,
+            binds_position: false,
+        }
+    }
+
+    pub fn with_position(self, binds_position: bool) -> Self {
+        Self {
+            binds_position,
+            ..self
         }
     }
 
     pub fn open(&self) -> Result<(Device, bool), String> {
-        let has_identity = self.device_uniq.as_deref().is_some_and(|u| !u.is_empty())
-            || self.device_name.as_deref().is_some_and(|n| !n.is_empty());
-        if !has_identity {
-            return Err("No device name or uniq specified".to_string());
-        }
+        self.require_identity()?;
 
         if let Some(dev) = self.scan_for_device()? {
             return self.finish_open(dev);
@@ -68,6 +107,33 @@ impl InputHandler {
         info!("Waiting for device to appear...");
         let dev = self.wait_for_matching_device()?;
         self.finish_open(dev)
+    }
+
+    /// Every node of the device, for a frontend that has to hear a press
+    /// whichever node it comes from.
+    pub fn node_paths(&self) -> Result<Vec<PathBuf>, String> {
+        self.require_identity()?;
+        let entries =
+            fs::read_dir(INPUT_DIR).map_err(|e| format!("Cannot open {INPUT_DIR}: {e}"))?;
+        Ok(entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|name| name.starts_with("event"))
+            })
+            .filter(|path| Device::open(path).is_ok_and(|dev| self.matches_device(&dev)))
+            .collect())
+    }
+
+    fn require_identity(&self) -> Result<(), String> {
+        let has_identity = self.device_uniq.as_deref().is_some_and(|u| !u.is_empty())
+            || self.device_name.as_deref().is_some_and(|n| !n.is_empty());
+        if !has_identity {
+            return Err("No device name or uniq specified".to_string());
+        }
+        Ok(())
     }
 
     fn matches_device(&self, dev: &Device) -> bool {
@@ -93,7 +159,7 @@ impl InputHandler {
         let entries = fs::read_dir(INPUT_DIR)
             .map_err(|e| format!("Cannot open {}: {}", INPUT_DIR, e))?;
 
-        let mut best: Option<(usize, PathBuf, Device)> = None;
+        let mut best: Option<(NodeRank, PathBuf, Device)> = None;
 
         for entry in entries.flatten() {
             let path = entry.path();
@@ -111,9 +177,14 @@ impl InputHandler {
                         continue;
                     }
                     let keys = mappable_keys(dev.supported_keys(), self.mouse);
-                    debug!("{} matches, {} mappable keys", path.display(), keys);
-                    if best.as_ref().is_none_or(|(most, _, _)| keys > *most) {
-                        best = Some((keys, path, dev));
+                    let position = reports_position(dev.supported_absolute_axes());
+                    debug!(
+                        "{path} matches, {keys} mappable keys, position: {position}",
+                        path = path.display()
+                    );
+                    let rank = NodeRank::new(self.binds_position, position, keys);
+                    if best.as_ref().is_none_or(|(top, _, _)| rank > *top) {
+                        best = Some((rank, path, dev));
                     }
                 }
                 Err(e) => {
@@ -211,8 +282,48 @@ impl InputHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::{mappable_keys, uniq_matches};
-    use evdev::{AttributeSet, Key};
+    use super::{mappable_keys, reports_position, uniq_matches, NodeRank};
+    use evdev::{AbsoluteAxisType, AttributeSet, Key};
+
+    #[test]
+    fn a_device_that_binds_a_stick_reads_the_node_that_reports_a_position() {
+        // An F3 ring on 5.15: one node per HID application, both with its address.
+        let xy = AttributeSet::from_iter([AbsoluteAxisType::ABS_X, AbsoluteAxisType::ABS_Y]);
+        let touchscreen = AttributeSet::from_iter([Key::BTN_TOUCH, Key::BTN_TOOL_PEN, Key::BTN_0]);
+        let consumer = AttributeSet::from_iter([
+            Key::KEY_VOLUMEUP,
+            Key::KEY_VOLUMEDOWN,
+            Key::KEY_MUTE,
+            Key::KEY_PLAYPAUSE,
+        ]);
+        let touchscreen_picked = |binds_position| {
+            NodeRank::new(
+                binds_position,
+                reports_position(Some(&xy)),
+                mappable_keys(Some(&touchscreen), false),
+            ) > NodeRank::new(
+                binds_position,
+                reports_position(None),
+                mappable_keys(Some(&consumer), false),
+            )
+        };
+
+        assert!(touchscreen_picked(true));
+        assert!(!touchscreen_picked(false));
+    }
+
+    #[test]
+    fn a_panel_reports_a_position_and_a_lone_axis_does_not() {
+        let multitouch = AttributeSet::from_iter([AbsoluteAxisType::ABS_MT_POSITION_X]);
+        let wheel = AttributeSet::from_iter([AbsoluteAxisType::ABS_X]);
+        let triggers =
+            AttributeSet::from_iter([AbsoluteAxisType::ABS_GAS, AbsoluteAxisType::ABS_BRAKE]);
+
+        assert!(reports_position(Some(&multitouch)));
+        assert!(!reports_position(Some(&wheel)));
+        assert!(!reports_position(Some(&triggers)));
+        assert!(!reports_position(None));
+    }
 
     #[test]
     fn a_mouse_node_loses_to_the_keyboard_node() {

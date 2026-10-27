@@ -542,31 +542,11 @@ var MapperManager = (function() {
     }
 
     function resolveDevicePath(id, cb) {
-        var uniq = bareUniq(getValue("device." + id, "uniq") || "");
-        var name = getValue("device." + id, "name") || "";
-        getJSON("/devices", function(data, err) {
-            if (err) { cb(null, "Devices: " + err); return; }
-            var list = data.devices || [];
-            var match = null;
-            for (var i = 0; i < list.length; i++) {
-                if (uniq && bareUniq(list[i].uniq || "") === uniq) {
-                    match = list[i];
-                    break;
-                }
-            }
-            if (!match && name) {
-                for (var j = 0; j < list.length; j++) {
-                    if (list[j].name === name) {
-                        match = list[j];
-                        break;
-                    }
-                }
-            }
-            if (match) {
-                cb(match.path, null);
-            } else {
-                cb(null, "Device not connected");
-            }
+        var section = "device." + id;
+        getJSON("/resolve?name=" + encodeURIComponent(getValue(section, "name") || "")
+            + "&uniq=" + encodeURIComponent(getValue(section, "uniq") || ""), function(data, err) {
+            if (err) { cb(null, "Resolve: " + err); return; }
+            if (data.ok) { cb(data.paths.join(","), null); } else { cb(null, data.error); }
         });
     }
 
