@@ -276,8 +276,10 @@ fn device_worker(mut cfg: config::DeviceConfig, mut settings: WorkerSettings) {
                     info!("[{}] running on_connect script", cfg.id);
                     execute_script(script);
                 }
-                match run_event_loop(&mut device, &mut mapper, grab, gamepad,
-                    &mut cfg, &mut generation, &mut settings) {
+                let exit = run_event_loop(&mut device, &mut mapper, grab, gamepad,
+                    &mut cfg, &mut generation, &mut settings);
+                mapper.release_held();
+                match exit {
                     Exit::Removed => {
                         drop(device);
                         cfg = park_until_reconfigured(&cfg.id, &mut generation);
