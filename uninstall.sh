@@ -21,6 +21,8 @@ kill "$(cat /tmp/kindle-button-mapper-waf.pid 2>/dev/null)" 2>/dev/null || true
 pkill -f waf-helper 2>/dev/null || true
 sleep 1
 
+grep -q kbm-im /etc/gtk-2.0/gtk.immodules 2>/dev/null && umount /etc/gtk-2.0/gtk.immodules
+
 /usr/sbin/mntroot rw
 
 rm -f /etc/upstart/kindle-button-mapper.conf

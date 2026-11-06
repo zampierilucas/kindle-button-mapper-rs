@@ -24,7 +24,7 @@ else
     exit 1
 fi
 
-mkdir -p "$INSTALL_DIR/scripts" "$INSTALL_DIR/illusion/MapperManager" "$INSTALL_DIR/assets"
+mkdir -p "$INSTALL_DIR/scripts" "$INSTALL_DIR/illusion/MapperManager" "$INSTALL_DIR/assets" "$INSTALL_DIR/im"
 
 # The tree may already have been copied straight into INSTALL_DIR; only copy
 # what isn't already in place (busybox cp aborts on same-file copies).
@@ -48,6 +48,7 @@ if [ "$SAME_DIR" != 1 ]; then
     cp "$SRC_DIR/uninstall.sh" "$INSTALL_DIR/"
     [ -f "$INSTALL_DIR/config.ini" ] || cp "$SRC_DIR/config.ini" "$INSTALL_DIR/"
     cp "$SRC_DIR/scripts/"*.sh "$INSTALL_DIR/scripts/"
+    cp "$SRC_DIR/im/"*.so "$INSTALL_DIR/im/" 2>/dev/null || true
     cp "$SRC_DIR/illusion/MapperManager.sh" "$SRC_DIR/illusion/install-waf-app.sh" "$INSTALL_DIR/illusion/"
     cp "$SRC_DIR/illusion/MapperManager/"* "$INSTALL_DIR/illusion/MapperManager/"
 fi
