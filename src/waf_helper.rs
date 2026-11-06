@@ -259,7 +259,7 @@ fn url_decode(s: &str) -> String {
 
 // ---- handlers ----
 
-type Node = (String, String, String, usize);
+type Node = (String, String, String, usize, bool);
 
 fn sort_nodes(nodes: &mut [Node]) {
     nodes.sort_by(|a, b| {
@@ -283,24 +283,25 @@ fn devices_json() -> String {
             if !name.starts_with("event") {
                 continue;
             }
-            let (dev_name, dev_uniq, keys) = Device::open(&path)
+            let (dev_name, dev_uniq, keys, mouse) = Device::open(&path)
                 .ok()
                 .map(|d| {
                     let n = d.name().unwrap_or("").to_string();
                     let u = d.unique_name().unwrap_or("").to_string();
-                    (n, u, crate::input::mappable_keys(d.supported_keys(), false))
+                    let k = d.supported_keys();
+                    (n, u, crate::input::mappable_keys(k, false), crate::input::mappable_keys(k, true) > 0)
                 })
                 .unwrap_or_default();
             if dev_name.starts_with("kindle-button-mapper") {
                 continue;
             }
-            entries.push((path.display().to_string(), dev_name, dev_uniq, keys));
+            entries.push((path.display().to_string(), dev_name, dev_uniq, keys, mouse));
         }
     }
     sort_nodes(&mut entries);
     let items: Vec<String> = entries
         .iter()
-        .map(|(p, n, u, _)| format!("{{\"path\":\"{}\",\"name\":\"{}\",\"uniq\":\"{}\"}}", esc(p), esc(n), esc(u)))
+        .map(|(p, n, u, _, m)| format!("{{\"path\":\"{}\",\"name\":\"{}\",\"uniq\":\"{}\",\"mouse\":{}}}", esc(p), esc(n), esc(u), m))
         .collect();
     format!("{{\"ok\":true,\"devices\":[{}]}}", items.join(","))
 }
@@ -682,7 +683,7 @@ mod tests {
     }
 
     fn node(path: &str, name: &str, uniq: &str, keys: usize) -> super::Node {
-        (path.into(), name.into(), uniq.into(), keys)
+        (path.into(), name.into(), uniq.into(), keys, false)
     }
 
     #[test]

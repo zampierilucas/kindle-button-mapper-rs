@@ -544,14 +544,15 @@ var MapperManager = (function() {
     function resolveDevicePath(id, cb) {
         var uniq = bareUniq(getValue("device." + id, "uniq") || "");
         var name = getValue("device." + id, "name") || "";
+        var mouse = (getValue("device." + id, "type") || "").toLowerCase() === "mouse";
         getJSON("/devices", function(data, err) {
             if (err) { cb(null, "Devices: " + err); return; }
             var list = data.devices || [];
             var match = null;
             for (var i = 0; i < list.length; i++) {
                 if (uniq && bareUniq(list[i].uniq || "") === uniq) {
-                    match = list[i];
-                    break;
+                    if (!match) match = list[i];
+                    if (!mouse || list[i].mouse) { match = list[i]; break; }
                 }
             }
             if (!match && name) {
