@@ -21,7 +21,8 @@ LOG_PATH="/var/log/kindle-button-mapper.log"
 # for callers that have a fallback.
 send_event() {
     for port in $KOREADER_PORTS; do
-        if curl -s --connect-timeout 1 "http://localhost:${port}/koreader/event/$1" >/dev/null 2>&1; then
+        netstat -ltn 2>/dev/null | grep -q ":${port} " || continue
+        if curl -s --connect-timeout 0.1 "http://localhost:${port}/koreader/event/$1" >/dev/null 2>&1; then
             return 0
         fi
     done
