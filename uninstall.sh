@@ -5,8 +5,18 @@ if [ "$1" = upgrade ]; then
     exit 0
 fi
 
-trap '/usr/sbin/mntroot ro 2>/dev/null' EXIT
+trap rootRo EXIT
 trap 'exit 130' INT TERM HUP
+
+rootRo()
+{
+    /usr/sbin/mntroot ro 2>/dev/null || true
+    awk '$2 == "/" { o = $4 } END { exit (o !~ /^rw(,|$)/) }' /proc/mounts || return 0
+    echo ""
+    echo "WARNING: the root filesystem is still writable, mntroot ro failed."
+    echo "Reboot the Kindle now. A crash before then can fill root with core"
+    echo "dumps and leave the Kindle unable to boot."
+}
 
 INSTALL_DIR=/mnt/us/kindle-button-mapper
 APPREG_DB=/var/local/appreg.db
@@ -37,7 +47,7 @@ DELETE FROM handlerIds WHERE handlerId='$APP_ID';
 EOF
 fi
 
-/usr/sbin/mntroot ro || true
+rootRo
 
 rm -rf "$INSTALL_DIR"
 rm -rf "/var/local/mesquite/$APP_ID" /var/local/mesquite/MapperManager
