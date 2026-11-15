@@ -315,7 +315,7 @@ fn run_event_loop(
     // Non-blocking + poll so we can notice a capture pause while idle.
     set_nonblocking(device.as_raw_fd());
     let ranges = stick_ranges(device);
-    let touch_device = input::is_touchscreen(device);
+    let mut touch_device = input::reads_strokes(device, !cfg.gesture_mappings.is_empty());
     let mut grab = grab;
     let mut grabbed = grab;
     let mut keyboard = wants_keyboard(cfg, device).then(vkeyboard::hold);
@@ -358,6 +358,7 @@ fn run_event_loop(
                     }
                     *mapper = Mapper::new(&fresh, settings);
                     *cfg = fresh;
+                    touch_device = input::reads_strokes(device, !cfg.gesture_mappings.is_empty());
                     let want = wants_keyboard(cfg, device);
                     if want != keyboard.is_some() {
                         keyboard = want.then(vkeyboard::hold);
@@ -419,7 +420,11 @@ fn run_event_loop(
                 }
                 InputEventKind::Key(key) if key.code() == 330 && touch_device => {  // BTN_TOUCH
                     activity = true;
-                    mapper.handle_touch(event.value() == 1);
+                    match event.value() {
+                        1 => mapper.handle_touch(true),
+                        0 => mapper.handle_touch(false),
+                        _ => {}
+                    }
                 }
                 InputEventKind::Key(key) => {
                     activity = true;

@@ -598,7 +598,7 @@ fn capture(query: &std::collections::HashMap<String, String>, config_path: &str)
 /// ABS_Y on a node that is no touchscreen (like an F3 ring), tells them apart
 /// by the contact's motion alone: its tool keys, and the keys that go down
 /// with a contact, BTN_TOUCH among them, are the same for every button.
-fn reports_contacts(device: &Device) -> bool {
+pub fn reports_contacts(device: &Device) -> bool {
     device
         .supported_keys()
         .is_some_and(|keys| keys.contains(Key::BTN_TOUCH))

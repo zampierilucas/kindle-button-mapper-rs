@@ -46,6 +46,10 @@ pub fn is_touchscreen(device: &Device) -> bool {
             .is_some_and(|a| a.contains(AbsoluteAxisType::ABS_MT_POSITION_X))
 }
 
+pub fn reads_strokes(device: &Device, binds_gestures: bool) -> bool {
+    is_touchscreen(device) || (binds_gestures && crate::waf_helper::reports_contacts(device))
+}
+
 /// A kernel that splits a device per HID application gives every node the
 /// same uniq, and stick directions and gestures only come from a node that
 /// reports a position. Fields compare in order, so serving the section's
