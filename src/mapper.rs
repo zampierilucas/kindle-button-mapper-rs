@@ -45,6 +45,8 @@ pub struct Mapper {
     trigger_sequence_start: HashMap<Trigger, Instant>,  // First press in sequence
     trigger_last_event: HashMap<Trigger, Instant>,      // Last event time
     trigger_longpress_fired: HashMap<Trigger, bool>,
+    held_keys: HashMap<Key, u16>,
+    held_dpad: HashMap<DpadDirection, u16>,
 }
 
 fn is_mouse_button(key: Key) -> bool {
@@ -89,6 +91,19 @@ impl Mapper {
             trigger_sequence_start: HashMap::new(),
             trigger_last_event: HashMap::new(),
             trigger_longpress_fired: HashMap::new(),
+            held_keys: HashMap::new(),
+            held_dpad: HashMap::new(),
+        }
+    }
+
+    fn key_down(&self, script: Option<&String>) -> Option<u16> {
+        let code = script.and_then(|s| action::single_key(s))?;
+        vkeyboard::forward(code, 1).then_some(code)
+    }
+
+    pub fn release_held(&mut self) {
+        for code in self.held_keys.drain().map(|(_, c)| c).chain(self.held_dpad.drain().map(|(_, c)| c)) {
+            vkeyboard::forward(code, 0);
         }
     }
 
@@ -140,6 +155,17 @@ impl Mapper {
         self.press_start.insert(key, Instant::now());
         self.long_press_fired.insert(key, false);
 
+        if !self.long_press_mappings.contains_key(&key) {
+            if let Some(code) = self.key_down(self.mappings.get(&key)) {
+                if self.log_buttons {
+                    info!("Button: {:?} (code: {}) -> key {} held", key, key.code(), code);
+                }
+                self.held_keys.insert(key, code);
+                self.last_repeat.remove(&key);
+                return;
+            }
+        }
+
         // Fire on the way down. A key with a long press mapping has to wait for
         // the release to tell the two apart.
         if self.long_press_mappings.contains_key(&key) {
@@ -160,6 +186,16 @@ impl Mapper {
 
     pub fn handle_held(&mut self, key: Key) {
         if self.relay(key, 2) {
+            return;
+        }
+        if let Some(&code) = self.held_keys.get(&key) {
+            let due = self.repeat_ms > 0
+                && self.press_start.get(&key).is_some_and(|s| s.elapsed() >= Duration::from_millis(self.long_press_ms))
+                && self.last_repeat.get(&key).is_none_or(|t| t.elapsed() >= Duration::from_millis(self.repeat_ms));
+            if due {
+                vkeyboard::forward(code, 2);
+                self.last_repeat.insert(key, Instant::now());
+            }
             return;
         }
         // Check if we've started long press mode
@@ -215,6 +251,13 @@ impl Mapper {
         if self.relay(key, 0) {
             return;
         }
+        if let Some(code) = self.held_keys.remove(&key) {
+            vkeyboard::forward(code, 0);
+            self.press_start.remove(&key);
+            self.long_press_fired.remove(&key);
+            self.last_repeat.remove(&key);
+            return;
+        }
         // A debounced press never registers in press_start, so its release
         // must not fire the action either.
         let had_press = self.press_start.remove(&key).is_some();
@@ -265,6 +308,33 @@ impl Mapper {
             (17, 1) => Some(DpadDirection::Down),    // Hat0Y = +1
             _ => None, // Center (0) = release
         };
+
+        let axis_dirs = match axis {
+            16 => [DpadDirection::Left, DpadDirection::Right],
+            17 => [DpadDirection::Up, DpadDirection::Down],
+            _ => return,
+        };
+        for d in axis_dirs {
+            if Some(d) != direction {
+                if let Some(code) = self.held_dpad.remove(&d) {
+                    vkeyboard::forward(code, 0);
+                }
+            }
+        }
+        if let Some(dir) = direction {
+            if self.held_dpad.contains_key(&dir) {
+                return;
+            }
+            if !self.dpad_longpress_mappings.contains_key(&dir) {
+                if let Some(code) = self.key_down(self.dpad_mappings.get(&dir)) {
+                    if self.log_buttons {
+                        info!("D-pad: {:?} -> key {} held", dir, code);
+                    }
+                    self.held_dpad.insert(dir, code);
+                    return;
+                }
+            }
+        }
 
         // Handle release (value = 0) - just update last_event time, don't clear sequence
         if value == 0 {
@@ -502,6 +572,12 @@ impl Mapper {
                 }
             }
         }
+    }
+}
+
+impl Drop for Mapper {
+    fn drop(&mut self) {
+        self.release_held();
     }
 }
 

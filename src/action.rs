@@ -187,6 +187,13 @@ fn injectable(cmd: &str) -> Option<String> {
     }
 }
 
+pub fn single_key(script: &str) -> Option<u16> {
+    match plan(script)?.as_slice() {
+        [Step::Key(k)] => crate::config::parse_key(k).map(|k| k.code()),
+        _ => None,
+    }
+}
+
 pub fn sends_keys(script: &str) -> bool {
     let words: Vec<&str> = script
         .split(|c: char| c.is_whitespace() || "|&;()`\"'".contains(c))
@@ -226,6 +233,17 @@ fn native_key(cmd: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_lone_key_is_held() {
+        assert_eq!(single_key("/mnt/us/kindle-button-mapper/scripts/key.sh KEY_LEFTSHIFT"), Some(42));
+        assert_eq!(single_key("scripts/kindle.sh home"), Some(102));
+        assert_eq!(single_key("scripts/key.sh page_next"), None);
+        assert_eq!(single_key("scripts/kindle.sh next_page"), None);
+        assert_eq!(single_key("scripts/auto.sh next_page"), None);
+        assert_eq!(single_key("scripts/koreader.sh menu"), None);
+        assert_eq!(single_key("/bin/true"), None);
+    }
 
     #[test]
     fn repeat_is_dropped_while_an_action_runs() {
