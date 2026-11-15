@@ -20,6 +20,16 @@ pre-start script
     fi
     echo $((n + 1)) > "$base/boot_attempts"
     echo "$(date) start attempt $((n + 1))" >> "$base/boot.log"
+
+    im=/var/tmp/kbm-im
+    so="$base/im/libkbm-im.so"
+    [ -e /lib/ld-linux-armhf.so.3 ] && so="$base/im/libkbm-im-hf.so"
+    if [ -f "$so" ] && ! grep -q kbm-im /etc/gtk-2.0/gtk.immodules; then
+        mkdir -p "$im"
+        cp "$so" "$im/libkbm-im.so"
+        sed "s|^\"/usr/lib/gtk-2.0/2.10.0/immodules/libinput.so\"|\"$im/libkbm-im.so\"|" /etc/gtk-2.0/gtk.immodules > "$im/gtk.immodules"
+        grep -q kbm-im "$im/gtk.immodules" && mount --bind "$im/gtk.immodules" /etc/gtk-2.0/gtk.immodules || true
+    fi
 end script
 
 script

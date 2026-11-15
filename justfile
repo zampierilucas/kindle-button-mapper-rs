@@ -13,8 +13,13 @@ build-release:
     cargo build --release
 
 # Build for Kindle (ARM, static musl - no glibc dependency)
-build-kindle:
+build-kindle: build-im
     cargo build --release --target armv7-unknown-linux-musleabihf
+
+# Build the native text field input method wrapper, soft-float and hard-float firmware
+build-im:
+    arm-linux-gnueabi-gcc -march=armv7-a -mfloat-abi=soft -shared -fPIC -O2 -Wall -nostdlib -o im/libkbm-im.so im/kbm-im.c -lgcc
+    arm-linux-gnueabihf-gcc -march=armv7-a -mfloat-abi=hard -mfpu=vfpv3-d16 -shared -fPIC -O2 -Wall -nostdlib -o im/libkbm-im-hf.so im/kbm-im.c -lgcc
 
 # Run locally (requires root for /dev/input access)
 run:
@@ -53,7 +58,7 @@ deploy: build-kindle
     @echo "Remounting filesystems as writable..."
     ssh kindle "/usr/sbin/mntroot rw && mount -o remount,rw /mnt/base-us"
     @echo "Creating directories..."
-    ssh kindle "mkdir -p /mnt/us/kindle-button-mapper/scripts"
+    ssh kindle "mkdir -p /mnt/us/kindle-button-mapper/scripts /mnt/us/kindle-button-mapper/im"
     @echo "Copying files..."
     # scp can't overwrite the running binary (busy on vfat); copy to a temp name and rename.
     scp target/armv7-unknown-linux-musleabihf/release/kindle-button-mapper kindle:/mnt/us/kindle-button-mapper/kindle-button-mapper.new
@@ -61,6 +66,7 @@ deploy: build-kindle
     @echo "Copying config (only if absent, to preserve device bindings)..."
     ssh kindle "test -f /mnt/us/kindle-button-mapper/config.ini" || scp config.ini kindle:/mnt/us/kindle-button-mapper/
     scp scripts/*.sh kindle:/mnt/us/kindle-button-mapper/scripts/
+    scp im/*.so kindle:/mnt/us/kindle-button-mapper/im/
     ssh kindle "chmod +x /mnt/us/kindle-button-mapper/scripts/*.sh"
     scp assets/kindle-button-mapper.upstart kindle:/etc/upstart/kindle-button-mapper.conf
     scp assets/99-kindle-button-mapper-pointer.rules kindle:/etc/udev/rules.d/
