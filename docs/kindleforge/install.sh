@@ -2,8 +2,18 @@
 
 set -e
 
-trap '/usr/sbin/mntroot ro 2>/dev/null' EXIT
+trap rootRo EXIT
 trap 'exit 130' INT TERM HUP
+
+rootRo()
+{
+    /usr/sbin/mntroot ro 2>/dev/null || true
+    awk '$2 == "/" { o = $4 } END { exit (o !~ /^rw(,|$)/) }' /proc/mounts || return 0
+    echo ""
+    echo "WARNING: the root filesystem is still writable, mntroot ro failed."
+    echo "Reboot the Kindle now. A crash before then can fill root with core"
+    echo "dumps and leave the Kindle unable to boot."
+}
 
 TMPDIR=/mnt/us/KFPM-Temporary
 INSTALL_DIR=/mnt/us/kindle-button-mapper
@@ -28,7 +38,7 @@ chmod +x /mnt/us/documents/MapperManager.sh
 
 sh "$INSTALL_DIR/illusion/install-waf-app.sh" || true
 
-/usr/sbin/mntroot ro || true
+rootRo
 
 # upstart only picks up a newly dropped .conf after a config reload; without
 # this the job stays "Unknown" (so the start below fails) until a reboot.
